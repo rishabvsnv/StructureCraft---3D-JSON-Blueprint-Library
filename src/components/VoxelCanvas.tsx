@@ -12,6 +12,14 @@ export interface VoxelCanvasHandle {
   resetCamera: () => void;
 }
 
+export interface SelectedVoxelInfo {
+  x: number;
+  y: number;
+  z: number;
+  paletteName: string;
+  paletteColor: string;
+}
+
 interface VoxelCanvasProps {
   compilerData: {
     groups: Record<number, number[]>;
@@ -25,17 +33,17 @@ interface VoxelCanvasProps {
     }>;
     dimensions: { x: number; y: number; z: number };
   } | null;
-  buildProgress?: number; // 0.0 to 1.0
+  buildProgress?: number;
+  onSelectVoxel?: (info: SelectedVoxelInfo | null) => void;
 }
 
 const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
-  ({ compilerData, buildProgress = 1.0 }, ref) => {
+  ({ compilerData, buildProgress = 1.0, onSelectVoxel }, ref) => {
     const mountRef = useRef<HTMLDivElement>(null);
     const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
     const controlsRef = useRef<OrbitControls | null>(null);
     const centerRef = useRef<THREE.Vector3>(new THREE.Vector3());
 
-    // Camera preset switcher methods
     useImperativeHandle(ref, () => ({
       setCameraView: (view) => {
         const camera = cameraRef.current;
@@ -48,7 +56,6 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
           compilerData.dimensions.z
         );
         const center = centerRef.current;
-
         controls.target.copy(center);
 
         switch (view) {
@@ -129,7 +136,7 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
       controls.target.set(centerX, centerY, centerZ);
       controlsRef.current = controls;
 
-      // 2. Bloom Post-Processing
+      // 2. Post-Processing
       const renderScene = new RenderPass(scene, camera);
       const bloomPass = new UnrealBloomPass(
         new THREE.Vector2(width, height),
@@ -137,20 +144,17 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
         0.4,
         0.35
       );
-
       const composer = new EffectComposer(renderer);
       composer.addPass(renderScene);
       composer.addPass(bloomPass);
 
-      // 3. Lighting
+      // 3. Lighting & Ground
       const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
       scene.add(ambientLight);
-
       const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
       dirLight.position.set(maxDim * 2, maxDim * 3, maxDim * 1.5);
       scene.add(dirLight);
 
-      // 4. Ground Grid
       const grid = new THREE.GridHelper(
         Math.max(compilerData.dimensions.x, compilerData.dimensions.z) * 1.5,
         20,
@@ -160,7 +164,7 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
       grid.position.set(centerX, -0.01, centerZ);
       scene.add(grid);
 
-      // 5. Structure Groups with Build Progress Filter
+      // 4. Mesh Groups & Raycasting Map
       const staticGroup = new THREE.Group();
       const dynamicGroup = new THREE.Group();
       dynamicGroup.position.set(centerX, centerY, centerZ);
@@ -172,30 +176,28 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
       const dummy = new THREE.Object3D();
       let hasAnimatedElements = false;
 
-      // Compute total voxels across all palettes to filter by buildProgress
       let totalVoxelCount = 0;
       Object.values(compilerData.groups).forEach((coords) => {
         totalVoxelCount += coords.length / 3;
       });
       const maxVisibleVoxels = Math.floor(totalVoxelCount * buildProgress);
-
       let processedVoxels = 0;
+
+      const interactiveMeshes: THREE.InstancedMesh[] = [];
+      const meshMetadata = new Map<THREE.InstancedMesh, { paletteName: string; paletteColor: string; rawCoords: number[] }>();
 
       compilerData.palette.forEach((p) => {
         const rawCoords = compilerData.groups[p.id] || [];
         const availableInPalette = rawCoords.length / 3;
         if (availableInPalette === 0) return;
 
-        // Determine how many voxels in this palette can be drawn
         const remainingQuota = Math.max(0, maxVisibleVoxels - processedVoxels);
         const countToRender = Math.min(availableInPalette, remainingQuota);
         processedVoxels += availableInPalette;
-
         if (countToRender === 0) return;
 
         const isAnimated = Boolean(p.animated);
         const isEmissive = Boolean(p.emissive);
-
         if (isAnimated) hasAnimatedElements = true;
 
         const material = new THREE.MeshStandardMaterial({
@@ -224,6 +226,12 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
         }
 
         instancedMesh.instanceMatrix.needsUpdate = true;
+        interactiveMeshes.push(instancedMesh);
+        meshMetadata.set(instancedMesh, {
+          paletteName: p.name,
+          paletteColor: p.color,
+          rawCoords,
+        });
 
         if (isAnimated) {
           dynamicGroup.add(instancedMesh);
@@ -232,18 +240,55 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
         }
       });
 
+      // 5. Raycasting Click Handler
+      const raycaster = new THREE.Raycaster();
+      const mouse = new THREE.Vector2();
+
+      const handleClick = (event: MouseEvent) => {
+        if (!container || !onSelectVoxel) return;
+        const rect = container.getBoundingClientRect();
+        mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+        mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObjects(interactiveMeshes, false);
+
+        if (intersects.length > 0 && intersects[0].instanceId !== undefined) {
+          const hit = intersects[0];
+          const mesh = hit.object as THREE.InstancedMesh;
+          const meta = meshMetadata.get(mesh);
+          const instanceId = hit.instanceId;
+
+          if (meta && instanceId !== undefined) {
+            const vx = meta.rawCoords[instanceId * 3];
+            const vy = meta.rawCoords[instanceId * 3 + 1];
+            const vz = meta.rawCoords[instanceId * 3 + 2];
+
+            onSelectVoxel({
+              x: vx,
+              y: vy,
+              z: vz,
+              paletteName: meta.paletteName,
+              paletteColor: meta.paletteColor,
+            });
+            return;
+          }
+        }
+        onSelectVoxel(null);
+      };
+
+      container.addEventListener("click", handleClick);
+
       // 6. Animation Loop
       let animationFrameId: number;
       const clock = new THREE.Clock();
 
       const animate = () => {
         animationFrameId = requestAnimationFrame(animate);
-
         if (hasAnimatedElements) {
           const elapsedTime = clock.getElapsedTime();
           dynamicGroup.rotation.z = elapsedTime * 0.9;
         }
-
         controls.update();
         composer.render();
       };
@@ -263,13 +308,14 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
 
       return () => {
         cancelAnimationFrame(animationFrameId);
+        container.removeEventListener("click", handleClick);
         window.removeEventListener("resize", handleResize);
         composer.dispose();
         renderer.dispose();
         boxGeometry.dispose();
         container.replaceChildren();
       };
-    }, [compilerData, buildProgress]);
+    }, [compilerData, buildProgress, onSelectVoxel]);
 
     return <div ref={mountRef} className="w-100 h-100" style={{ minHeight: "450px" }} />;
   }
