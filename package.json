@@ -9,9 +9,15 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
+    "@types/three": "^0.185.4",
+    "bootstrap": "^5.3.8",
+    "bootstrap-icons": "^1.13.1",
     "next": "16.3.4",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "three": "^0.185.1",
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@types/node": "^20",
