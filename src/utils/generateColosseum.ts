@@ -1,3 +1,4 @@
+// src/utils/generateColosseum.ts
 export function generateRomanColosseum(radius = 12, height = 10) {
   const voxels: Array<{ x: number; y: number; z: number; paletteId: number }> = [];
   const centerX = radius;
@@ -12,7 +13,6 @@ export function generateRomanColosseum(radius = 12, height = 10) {
       const x = Math.round(centerX + tierRadius * Math.cos(rad));
       const z = Math.round(centerZ + tierRadius * Math.sin(rad));
 
-      // Skip blocks periodically to form classical arched colonnades
       if (isArchedLevel && angle % 20 < 8) continue;
 
       let paletteId = 1;
@@ -27,9 +27,9 @@ export function generateRomanColosseum(radius = 12, height = 10) {
     title: "Parametric Roman Colosseum",
     dimensions: { x: radius * 2 + 1, y: height, z: radius * 2 + 1 },
     palette: [
-      { id: 1, name: "Roman Travertine", color: "#e5e0d8", roughness: 0.7 },
-      { id: 2, name: "Basalt Foundation", color: "#2d3748", roughness: 0.9 },
-      { id: 3, name: "Gilded Cornice", color: "#d97706", roughness: 0.2 },
+      { id: 1, name: "Roman Travertine", color: "#e5e0d8", roughness: 0.7, emissive: false, animated: false },
+      { id: 2, name: "Basalt Foundation", color: "#2d3748", roughness: 0.9, emissive: false, animated: false },
+      { id: 3, name: "Gilded Cornice", color: "#d97706", roughness: 0.2, emissive: false, animated: false },
     ],
     voxels,
   };

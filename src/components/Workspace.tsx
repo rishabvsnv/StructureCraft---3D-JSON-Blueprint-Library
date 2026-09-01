@@ -3,8 +3,9 @@
 import React, { useState, useEffect, useRef } from "react";
 import Editor from "@monaco-editor/react";
 import VoxelCanvas from "./VoxelCanvas";
-// 1. Import generator function
 import { generateRomanColosseum } from "@/utils/generateColosseum";
+// 1. Import the Sci-Fi Portal generator
+import { generateSciFiPortal } from "@/utils/generatePortal";
 
 export default function Workspace() {
   const [jsonCode, setJsonCode] = useState("");
@@ -12,7 +13,6 @@ export default function Workspace() {
   const [errorStatus, setErrorStatus] = useState<string | null>(null);
   const workerRef = useRef<Worker | null>(null);
 
-  // Helper to compile and update editor
   const loadStructure = (dataObject: object) => {
     const formatted = JSON.stringify(dataObject, null, 2);
     setJsonCode(formatted);
@@ -30,9 +30,8 @@ export default function Workspace() {
       }
     };
 
-    // Load Colosseum by default on startup
-    const initialData = generateRomanColosseum(10, 8);
-    loadStructure(initialData);
+    // Load Sci-Fi Portal on initial load
+    loadStructure(generateSciFiPortal(9, 3));
 
     return () => {
       workerRef.current?.terminate();
@@ -41,7 +40,7 @@ export default function Workspace() {
 
   return (
     <div className="d-flex flex-column vh-100 bg-black">
-      {/* Top Navbar */}
+      {/* Bootstrap Navbar */}
       <nav className="navbar navbar-expand navbar-dark bg-dark border-bottom border-secondary px-3 py-2">
         <div className="container-fluid p-0 d-flex justify-content-between align-items-center">
           <div className="d-flex align-items-center gap-2">
@@ -49,29 +48,36 @@ export default function Workspace() {
             <span className="navbar-brand fw-bold mb-0 fs-6">StructureCraft</span>
           </div>
 
-          {/* Generator Action Button */}
+          {/* Preset Buttons */}
           <div className="d-flex align-items-center gap-2">
             <button
-              className="btn btn-outline-warning btn-sm d-flex align-items-center gap-1"
-              onClick={() => loadStructure(generateRomanColosseum(12, 10))}
+              className="btn btn-outline-info btn-sm d-flex align-items-center gap-1"
+              onClick={() => loadStructure(generateSciFiPortal(9, 3))}
             >
-              <i className="bi bi-magic"></i> Generate Colosseum
+              <i className="bi bi-radioactive"></i> Sci-Fi Portal
+            </button>
+
+            <button
+              className="btn btn-outline-warning btn-sm d-flex align-items-center gap-1"
+              onClick={() => loadStructure(generateRomanColosseum(11, 9))}
+            >
+              <i className="bi bi-bank"></i> Colosseum
             </button>
 
             {errorStatus ? (
-              <span className="badge bg-danger-subtle text-danger border border-danger px-3 py-2">
+              <span className="badge bg-danger-subtle text-danger border border-danger px-3 py-2 ms-2">
                 <i className="bi bi-exclamation-triangle-fill me-1"></i> {errorStatus}
               </span>
             ) : (
-              <span className="badge bg-success-subtle text-success border border-success px-3 py-2">
-                <i className="bi bi-check-circle-fill me-1"></i> Ready
+              <span className="badge bg-success-subtle text-success border border-success px-3 py-2 ms-2">
+                <i className="bi bi-check-circle-fill me-1"></i> Compiled
               </span>
             )}
           </div>
         </div>
       </nav>
 
-      {/* Editor & 3D Viewport Panels */}
+      {/* Editor + 3D Viewport Split */}
       <div className="container-fluid flex-grow-1 p-0 overflow-hidden">
         <div className="row g-0 h-100">
           <div className="col-12 col-lg-6 d-flex flex-column border-end border-secondary h-100">
