@@ -12,6 +12,20 @@ import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 
+export type ShaderEffectType = "none" | "pulse" | "hologram" | "digital-rain";
+
+export interface PaletteItem {
+  id: number;
+  name: string;
+  color: string;
+  roughness?: number;
+  metalness?: number;
+  emissive?: boolean;
+  emissiveIntensity?: number;
+  animated?: boolean;
+  shaderFx?: ShaderEffectType;
+}
+
 export interface EnvironmentSettings {
   preset: "space" | "sunset" | "cyber" | "studio";
   bgColor: string;
@@ -33,6 +47,7 @@ export interface SelectedVoxelInfo {
   x: number;
   y: number;
   z: number;
+  paletteId: number;
   paletteName: string;
   paletteColor: string;
 }
@@ -45,14 +60,7 @@ export interface DroneTelemetry {
 interface VoxelCanvasProps {
   compilerData: {
     groups: Record<number, number[]>;
-    palette: Array<{
-      id: number;
-      name: string;
-      color: string;
-      roughness?: number;
-      emissive?: boolean;
-      animated?: boolean;
-    }>;
+    palette: PaletteItem[];
     dimensions: { x: number; y: number; z: number };
   } | null;
   buildProgress?: number;
@@ -99,7 +107,11 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
     const dirLightRef = useRef<THREE.DirectionalLight | null>(null);
     const bloomPassRef = useRef<UnrealBloomPass | null>(null);
 
-    // Synchronized live prop references (avoids canvas unmounting)
+    // Dynamic Shader Uniforms (shared time value)
+    const shaderUniformsRef = useRef<{ uTime: { value: number } }>({
+      uTime: { value: 0 },
+    });
+
     const walkthroughModeRef = useRef(walkthroughMode);
     walkthroughModeRef.current = walkthroughMode;
 
@@ -115,7 +127,6 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
     const onTelemetryUpdateRef = useRef(onTelemetryUpdate);
     onTelemetryUpdateRef.current = onTelemetryUpdate;
 
-    // FPV drone flight physics state
     const keysPressed = useRef<Record<string, boolean>>({});
     const droneVelocity = useRef<THREE.Vector3>(new THREE.Vector3());
     const cameraPitch = useRef(0);
@@ -176,11 +187,9 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
         controls.update();
       },
       enterFPV: () => {
-        // 1. Remove focus from any navbar/overlay button so Space cannot trigger clicks
         if (document.activeElement instanceof HTMLElement) {
           document.activeElement.blur();
         }
-
         const dom = rendererRef.current?.domElement;
         if (dom) {
           const camera = cameraRef.current;
@@ -192,7 +201,6 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
               Math.max(-0.99, Math.min(0.99, dir.y)),
             );
           }
-          // 2. Focus canvas element
           dom.focus?.();
           dom.requestPointerLock?.();
         }
@@ -204,14 +212,12 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
       },
     }));
 
-    // Seamlessly toggle controls without canvas teardown
     useEffect(() => {
       if (controlsRef.current) {
         controlsRef.current.enabled = !walkthroughMode;
       }
     }, [walkthroughMode]);
 
-    // Dynamic environment updates
     useEffect(() => {
       if (!sceneRef.current || !dirLightRef.current || !compilerData) return;
       const scene = sceneRef.current;
@@ -249,7 +255,7 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
       }
     }, [environmentConfig, compilerData]);
 
-    // Primary scene setup effect
+    // Primary scene setup
     useEffect(() => {
       const container = mountRef.current;
       if (!container || !compilerData) return;
@@ -268,7 +274,6 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
         compilerData.dimensions.z,
       );
 
-      // 1. Scene, Camera, Renderer
       const scene = new THREE.Scene();
       scene.background = new THREE.Color(environmentConfig.bgColor);
       if (environmentConfig.fogDensity > 0) {
@@ -304,7 +309,6 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
       controls.enabled = !walkthroughModeRef.current;
       controlsRef.current = controls;
 
-      // 2. Post-processing Bloom
       const renderScene = new RenderPass(scene, camera);
       const bloomPass = new UnrealBloomPass(
         new THREE.Vector2(width, height),
@@ -318,7 +322,6 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
       composer.addPass(renderScene);
       composer.addPass(bloomPass);
 
-      // 3. Lighting & Ground Grid
       const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
       scene.add(ambientLight);
 
@@ -338,7 +341,6 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
       grid.position.set(centerX, -0.01, centerZ);
       scene.add(grid);
 
-      // 4. Ghost Box for Sculpting
       const ghostGeo = new THREE.BoxGeometry(1.02, 1.02, 1.02);
       const ghostMat = new THREE.MeshBasicMaterial({
         color: 0x38bdf8,
@@ -350,7 +352,6 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
       ghostMesh.visible = false;
       scene.add(ghostMesh);
 
-      // 5. Structure Meshes
       const staticGroup = new THREE.Group();
       const dynamicGroup = new THREE.Group();
       dynamicGroup.position.set(centerX, centerY, centerZ);
@@ -371,7 +372,12 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
       const interactiveMeshes: THREE.InstancedMesh[] = [];
       const meshMetadata = new Map<
         THREE.InstancedMesh,
-        { paletteName: string; paletteColor: string; rawCoords: number[] }
+        {
+          paletteId: number;
+          paletteName: string;
+          paletteColor: string;
+          rawCoords: number[];
+        }
       >();
 
       compilerData.palette.forEach((p) => {
@@ -388,15 +394,59 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
         const isEmissive = Boolean(p.emissive);
         if (isAnimated) hasAnimatedElements = true;
 
+        const emissivePower = p.emissiveIntensity ?? 1.0;
         const material = new THREE.MeshStandardMaterial({
           color: new THREE.Color(p.color),
           roughness: p.roughness ?? 0.6,
-          metalness: 0.15,
+          metalness: p.metalness ?? 0.15,
           emissive: isEmissive
             ? new THREE.Color(p.color)
             : new THREE.Color(0x000000),
-          emissiveIntensity: isEmissive ? 1.0 : 0,
+          emissiveIntensity: isEmissive ? emissivePower : 0,
         });
+
+        // Inject Custom Shader FX via onBeforeCompile
+        if (p.shaderFx && p.shaderFx !== "none") {
+          material.onBeforeCompile = (shader) => {
+            shader.uniforms.uTime = shaderUniformsRef.current.uTime;
+
+            if (p.shaderFx === "pulse") {
+              shader.fragmentShader = `
+                uniform float uTime;
+                ${shader.fragmentShader}
+              `.replace(
+                `#include <dithering_fragment>`,
+                `#include <dithering_fragment>
+                 float pulseVal = (sin(uTime * 4.0) * 0.5 + 0.5);
+                 gl_FragColor.rgb += gl_FragColor.rgb * pulseVal * 0.7;
+                `,
+              );
+            } else if (p.shaderFx === "hologram") {
+              shader.fragmentShader = `
+                uniform float uTime;
+                ${shader.fragmentShader}
+              `.replace(
+                `#include <dithering_fragment>`,
+                `#include <dithering_fragment>
+                 float scanline = sin(gl_FragCoord.y * 0.8 + uTime * 6.0) * 0.5 + 0.5;
+                 gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.0, 0.9, 1.0), 0.35);
+                 gl_FragColor.rgb *= (0.7 + 0.3 * scanline);
+                `,
+              );
+            } else if (p.shaderFx === "digital-rain") {
+              shader.fragmentShader = `
+                uniform float uTime;
+                ${shader.fragmentShader}
+              `.replace(
+                `#include <dithering_fragment>`,
+                `#include <dithering_fragment>
+                 float matrix = step(0.85, fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453 + uTime * 2.0));
+                 gl_FragColor.rgb += vec3(0.0, 0.8, 0.2) * matrix * 0.9;
+                `,
+              );
+            }
+          };
+        }
 
         const instancedMesh = new THREE.InstancedMesh(
           boxGeometry,
@@ -422,6 +472,7 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
         instancedMesh.instanceMatrix.needsUpdate = true;
         interactiveMeshes.push(instancedMesh);
         meshMetadata.set(instancedMesh, {
+          paletteId: p.id,
           paletteName: p.name,
           paletteColor: p.color,
           rawCoords,
@@ -434,7 +485,6 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
         }
       });
 
-      // 6. Raycaster & Interaction
       const raycaster = new THREE.Raycaster();
       const mouse = new THREE.Vector2();
 
@@ -511,9 +561,7 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
       };
 
       const handleClick = (e: MouseEvent) => {
-        if (walkthroughModeRef.current) {
-          return;
-        }
+        if (walkthroughModeRef.current) return;
 
         const intersects = getRaycastHit(e);
         if (
@@ -551,6 +599,7 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
               x: vx,
               y: vy,
               z: vz,
+              paletteId: meta.paletteId,
               paletteName: meta.paletteName,
               paletteColor: meta.paletteColor,
             });
@@ -560,7 +609,6 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
         onSelectVoxel?.(null);
       };
 
-      // Native browser pointer lock handler
       const handlePointerLockChange = () => {
         const isLocked = document.pointerLockElement === renderer.domElement;
         onWalkthroughChangeRef.current?.(isLocked);
@@ -572,6 +620,19 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
       };
 
       const handleKeyDown = (e: KeyboardEvent) => {
+        if (walkthroughModeRef.current) {
+          if (
+            [
+              "Space",
+              "ArrowUp",
+              "ArrowDown",
+              "ArrowLeft",
+              "ArrowRight",
+            ].includes(e.code)
+          ) {
+            e.preventDefault();
+          }
+        }
         keysPressed.current[e.code] = true;
       };
 
@@ -586,7 +647,6 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
       container.addEventListener("mousemove", handlePointerMove);
       container.addEventListener("click", handleClick);
 
-      // 7. Render Loop with Timer
       let animationFrameId: number;
       const timer = new THREE.Timer();
       timer.connect(document);
@@ -598,6 +658,9 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
         timer.update(timestamp);
         const delta = Math.min(timer.getDelta(), 0.1);
         const elapsedTime = timer.getElapsed();
+
+        // Feed global time to custom shaders
+        shaderUniformsRef.current.uTime.value = elapsedTime;
 
         if (hasAnimatedElements) {
           dynamicGroup.rotation.z = elapsedTime * 0.9;
@@ -687,7 +750,7 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
         ghostMat.dispose();
         container.replaceChildren();
       };
-    }, [compilerData, buildProgress]); // Notice: walkthroughMode is omitted to prevent canvas rebuilding
+    }, [compilerData, buildProgress]);
 
     return (
       <div

@@ -7,6 +7,8 @@ import VoxelCanvas, {
   SelectedVoxelInfo,
   EnvironmentSettings,
   DroneTelemetry,
+  PaletteItem,
+  ShaderEffectType,
 } from "./VoxelCanvas";
 import RadarHUD from "./RadarHUD";
 import { generateSciFiPortal } from "@/utils/generatePortal";
@@ -69,30 +71,25 @@ export default function Workspace() {
   const [showModal, setShowModal] = useState(false);
   const [modalTab, setModalTab] = useState<"presets" | "saved">("presets");
 
-  // Storage
   const [savedList, setSavedList] = useState<SavedBlueprintItem[]>([]);
   const [saveTitleInput, setSaveTitleInput] = useState("");
 
-  // Playback & Inspector
   const [buildProgress, setBuildProgress] = useState(1.0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [selectedVoxel, setSelectedVoxel] = useState<SelectedVoxelInfo | null>(
-    null,
-  );
+  const [selectedVoxel, setSelectedVoxel] = useState<SelectedVoxelInfo | null>(null);
 
-  // Live Modes
   const [sculptMode, setSculptMode] = useState(false);
   const [activePaletteId, setActivePaletteId] = useState(1);
   const [walkthroughMode, setWalkthroughMode] = useState(false);
-  const [droneTelemetry, setDroneTelemetry] = useState<DroneTelemetry | null>(
-    null,
-  );
+  const [isPointerLocked, setIsPointerLocked] = useState(false);
+  const [droneTelemetry, setDroneTelemetry] = useState<DroneTelemetry | null>(null);
 
-  // Environment Studio State
   const [showStudioPanel, setShowStudioPanel] = useState(false);
-  const [envConfig, setEnvConfig] = useState<EnvironmentSettings>(
-    ENVIRONMENT_PRESETS.space,
-  );
+  const [envConfig, setEnvConfig] = useState<EnvironmentSettings>(ENVIRONMENT_PRESETS.space);
+
+  // Material & Shader Studio Drawer State
+  const [showPaletteStudio, setShowPaletteStudio] = useState(false);
+  const [selectedPaletteItem, setSelectedPaletteItem] = useState<PaletteItem | null>(null);
 
   const canvasRef = useRef<VoxelCanvasHandle | null>(null);
   const workerRef = useRef<Worker | null>(null);
@@ -106,8 +103,10 @@ export default function Workspace() {
     setSelectedVoxel(null);
     setShowModal(false);
 
-    if ((dataObject as any).palette?.length > 0) {
-      setActivePaletteId((dataObject as any).palette[0].id);
+    const palette = (dataObject as any).palette;
+    if (palette?.length > 0) {
+      setActivePaletteId(palette[0].id);
+      setSelectedPaletteItem(palette[0]);
     }
   };
 
@@ -119,6 +118,12 @@ export default function Workspace() {
       if (e.data.status === "success") {
         setCompilerOutput(e.data);
         setErrorStatus(null);
+
+        // Keep palette item editor synced with active re-compilations
+        if (selectedPaletteItem) {
+          const matched = e.data.palette.find((p: PaletteItem) => p.id === selectedPaletteItem.id);
+          if (matched) setSelectedPaletteItem(matched);
+        }
       } else {
         setErrorStatus(e.data.message);
       }
@@ -131,18 +136,37 @@ export default function Workspace() {
     };
   }, []);
 
-  const [isPointerLocked, setIsPointerLocked] = useState(false);
-
   const handleToggleWalkthrough = () => {
     if (!walkthroughMode) {
       setWalkthroughMode(true);
       setSculptMode(false);
-      // Attempt lock immediately
-      canvasRef.current?.enterFPV();
+      setShowPaletteStudio(false);
+      setShowStudioPanel(false);
     } else {
       setWalkthroughMode(false);
       setIsPointerLocked(false);
       canvasRef.current?.exitFPV();
+    }
+  };
+
+  // Live Mutation of a Palette Property (updates Monaco JSON & recompiles)
+  const updatePaletteProperty = <K extends keyof PaletteItem>(key: K, value: PaletteItem[K]) => {
+    if (!selectedPaletteItem) return;
+    try {
+      const parsed = JSON.parse(jsonCode);
+      parsed.palette = (parsed.palette || []).map((p: PaletteItem) => {
+        if (p.id === selectedPaletteItem.id) {
+          return { ...p, [key]: value };
+        }
+        return p;
+      });
+
+      const updatedCode = JSON.stringify(parsed, null, 2);
+      setJsonCode(updatedCode);
+      workerRef.current?.postMessage({ jsonString: updatedCode });
+      setSelectedPaletteItem((prev) => (prev ? { ...prev, [key]: value } : null));
+    } catch (err) {
+      console.error("Failed to update palette property:", err);
     }
   };
 
@@ -218,37 +242,50 @@ export default function Workspace() {
         <div className="container-fluid p-0 d-flex justify-content-between align-items-center">
           <div className="d-flex align-items-center gap-2">
             <i className="bi bi-boxes text-primary fs-4"></i>
-            <span className="navbar-brand fw-bold mb-0 fs-6">
-              StructureCraft
-            </span>
+            <span className="navbar-brand fw-bold mb-0 fs-6">StructureCraft</span>
           </div>
 
           <div className="d-flex align-items-center gap-2">
-            {/* Cinematic Drone Walkthrough Mode */}
+            {/* Palette & Shader Studio Toggle */}
             <button
               className={`btn btn-sm d-flex align-items-center gap-1 ${
-                walkthroughMode
-                  ? "btn-danger fw-bold shadow"
-                  : "btn-outline-info"
+                showPaletteStudio ? "btn-info text-dark fw-bold" : "btn-outline-info"
               }`}
-              onClick={handleToggleWalkthrough}
+              onClick={() => {
+                setShowPaletteStudio(!showPaletteStudio);
+                if (!showPaletteStudio) setShowStudioPanel(false);
+              }}
             >
-              <i
-                className={`bi ${walkthroughMode ? "bi-camera-video-fill" : "bi-camera-video"}`}
-              ></i>
-              {walkthroughMode ? "Exit FPV Drone" : "FPV Drone"}
+              <i className="bi bi-palette-fill"></i> Material & Shaders
             </button>
 
             {/* Lighting Studio Toggle */}
             <button
               className={`btn btn-sm d-flex align-items-center gap-1 ${
-                showStudioPanel
-                  ? "btn-warning text-dark fw-bold"
-                  : "btn-outline-warning"
+                showStudioPanel ? "btn-warning text-dark fw-bold" : "btn-outline-warning"
               }`}
-              onClick={() => setShowStudioPanel(!showStudioPanel)}
+              onClick={() => {
+                setShowStudioPanel(!showStudioPanel);
+                if (!showStudioPanel) setShowPaletteStudio(false);
+              }}
             >
               <i className="bi bi-sun"></i> Studio
+            </button>
+
+            {/* Cinematic Drone Walkthrough Mode */}
+            <button
+              type="button"
+              tabIndex={-1}
+              className={`btn btn-sm d-flex align-items-center gap-1 ${
+                walkthroughMode ? "btn-danger fw-bold shadow" : "btn-outline-light"
+              }`}
+              onClick={(e) => {
+                e.currentTarget.blur();
+                handleToggleWalkthrough();
+              }}
+            >
+              <i className={`bi ${walkthroughMode ? "bi-camera-video-fill" : "bi-camera-video"}`}></i>
+              {walkthroughMode ? "Exit FPV" : "FPV Drone"}
             </button>
 
             {/* Sculptor Toggle */}
@@ -261,9 +298,7 @@ export default function Workspace() {
                 if (!sculptMode) setWalkthroughMode(false);
               }}
             >
-              <i
-                className={`bi ${sculptMode ? "bi-hammer" : "bi-pencil-square"}`}
-              ></i>
+              <i className={`bi ${sculptMode ? "bi-hammer" : "bi-pencil-square"}`}></i>
               {sculptMode ? "Sculpting" : "Sculpt"}
             </button>
 
@@ -298,8 +333,7 @@ export default function Workspace() {
 
             {errorStatus ? (
               <span className="badge bg-danger-subtle text-danger border border-danger px-3 py-2 ms-2">
-                <i className="bi bi-exclamation-triangle-fill me-1"></i>{" "}
-                {errorStatus}
+                <i className="bi bi-exclamation-triangle-fill me-1"></i> {errorStatus}
               </span>
             ) : (
               <span className="badge bg-success-subtle text-success border border-success px-3 py-2 ms-2">
@@ -378,9 +412,7 @@ export default function Workspace() {
                     setIsPlaying(!isPlaying);
                   }}
                 >
-                  <i
-                    className={`bi ${isPlaying ? "bi-pause-fill" : "bi-play-fill"}`}
-                  ></i>
+                  <i className={`bi ${isPlaying ? "bi-pause-fill" : "bi-play-fill"}`}></i>
                 </button>
                 <input
                   type="range"
@@ -411,11 +443,18 @@ export default function Workspace() {
                 onWalkthroughChange={(active: boolean) => {
                   setIsPointerLocked(active);
                   if (!active && walkthroughMode) {
-                    // User pressed ESC
                     setWalkthroughMode(false);
                   }
                 }}
-                onSelectVoxel={(info) => setSelectedVoxel(info)}
+                onSelectVoxel={(info) => {
+                  setSelectedVoxel(info);
+                  if (info && compilerOutput?.palette) {
+                    const matched = compilerOutput.palette.find(
+                      (p: PaletteItem) => p.id === info.paletteId,
+                    );
+                    if (matched) setSelectedPaletteItem(matched);
+                  }
+                }}
                 onAddVoxel={handleAddVoxel}
                 onDeleteVoxel={handleDeleteVoxel}
                 onTelemetryUpdate={(telemetry) => setDroneTelemetry(telemetry)}
@@ -424,80 +463,40 @@ export default function Workspace() {
               {/* Engagement Overlay when Walkthrough is on but pointer is not locked */}
               {walkthroughMode && !isPointerLocked && (
                 <div
-                  className="position-absolute top-0 start-0 w-100 h-100 d-flex flex-column align-items-center justify-content-center text-center cursor-pointer"
+                  className="position-absolute top-0 start-0 w-100 h-100 d-flex flex-column align-items-center justify-content-center text-center"
                   style={{
                     backgroundColor: "rgba(0, 0, 0, 0.65)",
                     backdropFilter: "blur(4px)",
                     zIndex: 30,
-                    cursor: "pointer",
                   }}
-                  onClick={() => canvasRef.current?.enterFPV()}
                 >
                   <div
                     className="card bg-dark border-info text-light p-4 shadow-lg"
                     style={{ maxWidth: "340px" }}
                   >
                     <i className="bi bi-cursor-fill text-info fs-1 mb-2"></i>
-                    <h5 className="fw-bold text-info mb-1">
-                      Click to Pilot Drone
-                    </h5>
+                    <h5 className="fw-bold text-info mb-1">Click to Pilot Drone</h5>
                     <p className="text-secondary small mb-3">
                       Clicking captures your mouse for free flight.
                     </p>
                     <div className="text-start small bg-black bg-opacity-50 p-2 rounded border border-secondary font-monospace mb-3">
-                      <div>
-                        <strong className="text-white">W, A, S, D</strong> : Fly
-                        / Strafe
-                      </div>
-                      <div>
-                        <strong className="text-white">Space / Shift</strong> :
-                        Ascend / Descend
-                      </div>
-                      <div>
-                        <strong className="text-white">Mouse</strong> : Look
-                        Around
-                      </div>
-                      <div>
-                        <strong className="text-white">ESC</strong> : Release
-                        Mouse
-                      </div>
+                      <div><strong className="text-white">W, A, S, D</strong> : Fly / Strafe</div>
+                      <div><strong className="text-white">Space / Shift</strong> : Ascend / Descend</div>
+                      <div><strong className="text-white">Mouse</strong> : Look Around</div>
+                      <div><strong className="text-white">ESC</strong> : Release Mouse</div>
                     </div>
-                    <button className="btn btn-info btn-sm fw-bold w-100">
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      className="btn btn-info btn-sm fw-bold w-100"
+                      onClick={(e) => {
+                        e.currentTarget.blur();
+                        canvasRef.current?.enterFPV();
+                      }}
+                    >
                       Engage Thrusters
                     </button>
                   </div>
-                </div>
-              )}
-
-              {/* Walkthrough Flight HUD Controls Banner */}
-              {walkthroughMode && (
-                <div
-                  className="position-absolute top-0 start-50 translate-middle-x mt-3 px-3 py-1 rounded-pill border border-info shadow-lg text-info d-flex align-items-center gap-3"
-                  style={{
-                    zIndex: 25,
-                    backdropFilter: "blur(8px)",
-                    backgroundColor: "rgba(15, 23, 42, 0.85)",
-                    fontSize: "12px",
-                  }}
-                >
-                  <span>
-                    <strong>WASD:</strong> Strafe
-                  </span>
-                  <span>•</span>
-                  <span>
-                    <strong>Space/Shift:</strong> Elevate
-                  </span>
-                  <span>•</span>
-                  <span>
-                    <strong>Mouse:</strong> Look
-                  </span>
-                  <span>•</span>
-                  <span
-                    className="badge bg-danger cursor-pointer"
-                    onClick={handleToggleWalkthrough}
-                  >
-                    ESC / Exit
-                  </span>
                 </div>
               )}
 
@@ -507,6 +506,186 @@ export default function Workspace() {
                   telemetry={droneTelemetry}
                   dimensions={compilerOutput.dimensions}
                 />
+              )}
+
+              {/* Interactive Palette Studio & Shader Customizer Drawer */}
+              {showPaletteStudio && (
+                <div
+                  className="position-absolute top-0 end-0 m-3 p-3 rounded bg-dark border border-secondary shadow-lg text-light"
+                  style={{
+                    width: "310px",
+                    zIndex: 20,
+                    backdropFilter: "blur(10px)",
+                    backgroundColor: "rgba(15, 23, 42, 0.92)",
+                    maxHeight: "90%",
+                    overflowY: "auto",
+                  }}
+                >
+                  <div className="d-flex justify-content-between align-items-center mb-3 pb-2 border-bottom border-secondary">
+                    <span className="small fw-bold text-info text-uppercase">
+                      <i className="bi bi-brush me-1"></i> Palette & Shader Studio
+                    </span>
+                    <button
+                      className="btn-close btn-close-white"
+                      style={{ fontSize: "10px" }}
+                      onClick={() => setShowPaletteStudio(false)}
+                    ></button>
+                  </div>
+
+                  {/* Palette Swatches List */}
+                  <label className="form-label small text-secondary mb-1">Select Material Swatch</label>
+                  <div className="d-flex flex-wrap gap-2 mb-3">
+                    {compilerOutput?.palette?.map((item: PaletteItem) => (
+                      <button
+                        key={item.id}
+                        className={`btn p-0 rounded-circle border ${
+                          selectedPaletteItem?.id === item.id
+                            ? "border-white border-2 scale-110 shadow"
+                            : "border-secondary opacity-75"
+                        }`}
+                        style={{
+                          width: "28px",
+                          height: "28px",
+                          backgroundColor: item.color,
+                        }}
+                        title={`${item.name} (ID: ${item.id})`}
+                        onClick={() => {
+                          setSelectedPaletteItem(item);
+                          setActivePaletteId(item.id);
+                        }}
+                      />
+                    ))}
+                  </div>
+
+                  {selectedPaletteItem ? (
+                    <div className="border-top border-secondary pt-2">
+                      <div className="d-flex justify-content-between align-items-center mb-2">
+                        <strong className="text-light small">{selectedPaletteItem.name}</strong>
+                        <span className="badge bg-secondary font-monospace" style={{ fontSize: "10px" }}>
+                          ID: {selectedPaletteItem.id}
+                        </span>
+                      </div>
+
+                      {/* Color Picker */}
+                      <div className="mb-2 d-flex justify-content-between align-items-center">
+                        <label className="form-label small text-secondary mb-0">Base Color</label>
+                        <div className="d-flex align-items-center gap-2">
+                          <span className="font-monospace small text-light">{selectedPaletteItem.color}</span>
+                          <input
+                            type="color"
+                            className="form-control form-control-color bg-transparent border-0 p-0"
+                            style={{ width: "26px", height: "26px", cursor: "pointer" }}
+                            value={selectedPaletteItem.color}
+                            onChange={(e) => updatePaletteProperty("color", e.target.value)}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Roughness Slider */}
+                      <div className="mb-2">
+                        <div className="d-flex justify-content-between">
+                          <label className="form-label small text-secondary mb-0">Roughness</label>
+                          <small className="text-info font-monospace">
+                            {(selectedPaletteItem.roughness ?? 0.5).toFixed(2)}
+                          </small>
+                        </div>
+                        <input
+                          type="range"
+                          className="form-range"
+                          min="0.0"
+                          max="1.0"
+                          step="0.05"
+                          value={selectedPaletteItem.roughness ?? 0.5}
+                          onChange={(e) =>
+                            updatePaletteProperty("roughness", parseFloat(e.target.value))
+                          }
+                        />
+                      </div>
+
+                      {/* Metalness Slider */}
+                      <div className="mb-2">
+                        <div className="d-flex justify-content-between">
+                          <label className="form-label small text-secondary mb-0">Metalness</label>
+                          <small className="text-info font-monospace">
+                            {(selectedPaletteItem.metalness ?? 0.15).toFixed(2)}
+                          </small>
+                        </div>
+                        <input
+                          type="range"
+                          className="form-range"
+                          min="0.0"
+                          max="1.0"
+                          step="0.05"
+                          value={selectedPaletteItem.metalness ?? 0.15}
+                          onChange={(e) =>
+                            updatePaletteProperty("metalness", parseFloat(e.target.value))
+                          }
+                        />
+                      </div>
+
+                      {/* Emissive Glow Toggle & Intensity */}
+                      <div className="mb-2">
+                        <div className="form-check form-switch mb-1">
+                          <input
+                            className="form-check-input"
+                            type="checkbox"
+                            id="emissiveSwitch"
+                            checked={Boolean(selectedPaletteItem.emissive)}
+                            onChange={(e) => updatePaletteProperty("emissive", e.target.checked)}
+                          />
+                          <label className="form-check-label small text-secondary" htmlFor="emissiveSwitch">
+                            Enable Emissive Bloom Glow
+                          </label>
+                        </div>
+
+                        {selectedPaletteItem.emissive && (
+                          <div>
+                            <div className="d-flex justify-content-between">
+                              <label className="form-label small text-secondary mb-0">Glow Intensity</label>
+                              <small className="text-info font-monospace">
+                                {(selectedPaletteItem.emissiveIntensity ?? 1.0).toFixed(1)}x
+                              </small>
+                            </div>
+                            <input
+                              type="range"
+                              className="form-range"
+                              min="0.2"
+                              max="3.0"
+                              step="0.1"
+                              value={selectedPaletteItem.emissiveIntensity ?? 1.0}
+                              onChange={(e) =>
+                                updatePaletteProperty("emissiveIntensity", parseFloat(e.target.value))
+                              }
+                            />
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Custom Shader FX Selector */}
+                      <div className="mb-1">
+                        <label className="form-label small text-secondary mb-1">
+                          Procedural Shader FX
+                        </label>
+                        <select
+                          className="form-select form-select-sm bg-black text-light border-secondary"
+                          value={selectedPaletteItem.shaderFx || "none"}
+                          onChange={(e) =>
+                            updatePaletteProperty("shaderFx", e.target.value as ShaderEffectType)
+                          }
+                        >
+                          <option value="none">Standard Material</option>
+                          <option value="pulse">Pulse Oscillation</option>
+                          <option value="hologram">Holographic Scanlines</option>
+                          <option value="digital-rain">Matrix Digital Rain</option>
+                        </select>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-secondary small text-center py-3">
+                      Select a swatch to customize material parameters.
+                    </div>
+                  )}
+                </div>
               )}
 
               {/* Lighting Studio Panel */}
@@ -532,36 +711,26 @@ export default function Workspace() {
                   </div>
 
                   <div className="mb-3">
-                    <label className="form-label small text-secondary mb-1">
-                      Atmosphere Preset
-                    </label>
+                    <label className="form-label small text-secondary mb-1">Atmosphere Preset</label>
                     <div className="btn-group btn-group-sm w-100">
-                      {(["space", "sunset", "cyber", "studio"] as const).map(
-                        (p) => (
-                          <button
-                            key={p}
-                            className={`btn ${
-                              envConfig.preset === p
-                                ? "btn-warning text-dark fw-bold"
-                                : "btn-outline-secondary"
-                            }`}
-                            onClick={() => setEnvConfig(ENVIRONMENT_PRESETS[p])}
-                          >
-                            {p.charAt(0).toUpperCase() + p.slice(1)}
-                          </button>
-                        ),
-                      )}
+                      {(["space", "sunset", "cyber", "studio"] as const).map((p) => (
+                        <button
+                          key={p}
+                          className={`btn ${
+                            envConfig.preset === p ? "btn-warning text-dark fw-bold" : "btn-outline-secondary"
+                          }`}
+                          onClick={() => setEnvConfig(ENVIRONMENT_PRESETS[p])}
+                        >
+                          {p.charAt(0).toUpperCase() + p.slice(1)}
+                        </button>
+                      ))}
                     </div>
                   </div>
 
                   <div className="mb-2">
                     <div className="d-flex justify-content-between">
-                      <label className="form-label small text-secondary mb-0">
-                        Sun Azimuth
-                      </label>
-                      <small className="text-warning font-monospace">
-                        {envConfig.sunAngle}°
-                      </small>
+                      <label className="form-label small text-secondary mb-0">Sun Azimuth</label>
+                      <small className="text-warning font-monospace">{envConfig.sunAngle}°</small>
                     </div>
                     <input
                       type="range"
@@ -570,22 +739,15 @@ export default function Workspace() {
                       max="360"
                       value={envConfig.sunAngle}
                       onChange={(e) =>
-                        setEnvConfig({
-                          ...envConfig,
-                          sunAngle: parseInt(e.target.value),
-                        })
+                        setEnvConfig({ ...envConfig, sunAngle: parseInt(e.target.value) })
                       }
                     />
                   </div>
 
                   <div className="mb-2">
                     <div className="d-flex justify-content-between">
-                      <label className="form-label small text-secondary mb-0">
-                        Sun Elevation
-                      </label>
-                      <small className="text-warning font-monospace">
-                        {envConfig.sunElevation}°
-                      </small>
+                      <label className="form-label small text-secondary mb-0">Sun Elevation</label>
+                      <small className="text-warning font-monospace">{envConfig.sunElevation}°</small>
                     </div>
                     <input
                       type="range"
@@ -594,22 +756,15 @@ export default function Workspace() {
                       max="90"
                       value={envConfig.sunElevation}
                       onChange={(e) =>
-                        setEnvConfig({
-                          ...envConfig,
-                          sunElevation: parseInt(e.target.value),
-                        })
+                        setEnvConfig({ ...envConfig, sunElevation: parseInt(e.target.value) })
                       }
                     />
                   </div>
 
                   <div className="mb-2">
                     <div className="d-flex justify-content-between">
-                      <label className="form-label small text-secondary mb-0">
-                        Sun Intensity
-                      </label>
-                      <small className="text-warning font-monospace">
-                        {envConfig.sunIntensity.toFixed(1)}x
-                      </small>
+                      <label className="form-label small text-secondary mb-0">Sun Intensity</label>
+                      <small className="text-warning font-monospace">{envConfig.sunIntensity.toFixed(1)}x</small>
                     </div>
                     <input
                       type="range"
@@ -619,19 +774,14 @@ export default function Workspace() {
                       step="0.1"
                       value={envConfig.sunIntensity}
                       onChange={(e) =>
-                        setEnvConfig({
-                          ...envConfig,
-                          sunIntensity: parseFloat(e.target.value),
-                        })
+                        setEnvConfig({ ...envConfig, sunIntensity: parseFloat(e.target.value) })
                       }
                     />
                   </div>
 
                   <div className="mb-2">
                     <div className="d-flex justify-content-between">
-                      <label className="form-label small text-secondary mb-0">
-                        Fog Density
-                      </label>
+                      <label className="form-label small text-secondary mb-0">Fog Density</label>
                       <small className="text-warning font-monospace">
                         {(envConfig.fogDensity * 1000).toFixed(0)}
                       </small>
@@ -644,22 +794,15 @@ export default function Workspace() {
                       step="0.001"
                       value={envConfig.fogDensity}
                       onChange={(e) =>
-                        setEnvConfig({
-                          ...envConfig,
-                          fogDensity: parseFloat(e.target.value),
-                        })
+                        setEnvConfig({ ...envConfig, fogDensity: parseFloat(e.target.value) })
                       }
                     />
                   </div>
 
                   <div className="mb-1">
                     <div className="d-flex justify-content-between">
-                      <label className="form-label small text-secondary mb-0">
-                        Bloom Glow
-                      </label>
-                      <small className="text-warning font-monospace">
-                        {envConfig.bloomStrength.toFixed(2)}
-                      </small>
+                      <label className="form-label small text-secondary mb-0">Bloom Glow</label>
+                      <small className="text-warning font-monospace">{envConfig.bloomStrength.toFixed(2)}</small>
                     </div>
                     <input
                       type="range"
@@ -669,10 +812,7 @@ export default function Workspace() {
                       step="0.05"
                       value={envConfig.bloomStrength}
                       onChange={(e) =>
-                        setEnvConfig({
-                          ...envConfig,
-                          bloomStrength: parseFloat(e.target.value),
-                        })
+                        setEnvConfig({ ...envConfig, bloomStrength: parseFloat(e.target.value) })
                       }
                     />
                   </div>
@@ -683,22 +823,16 @@ export default function Workspace() {
               {sculptMode && compilerOutput?.palette && (
                 <div
                   className="position-absolute bottom-0 start-50 translate-middle-x mb-3 p-2 rounded-pill bg-dark border border-secondary shadow-lg d-flex align-items-center gap-2"
-                  style={{
-                    zIndex: 10,
-                    backdropFilter: "blur(8px)",
-                    backgroundColor: "rgba(18,20,24,0.9)",
-                  }}
+                  style={{ zIndex: 10, backdropFilter: "blur(8px)", backgroundColor: "rgba(18,20,24,0.9)" }}
                 >
                   <span className="badge text-secondary small px-2">
                     <i className="bi bi-palette me-1"></i> Block:
                   </span>
-                  {compilerOutput.palette.map((item: any) => (
+                  {compilerOutput.palette.map((item: PaletteItem) => (
                     <button
                       key={item.id}
                       className={`btn p-0 rounded-circle border ${
-                        activePaletteId === item.id
-                          ? "border-white border-2 scale-110 shadow"
-                          : "border-dark opacity-75"
+                        activePaletteId === item.id ? "border-white border-2 scale-110 shadow" : "border-dark opacity-75"
                       }`}
                       style={{
                         width: "26px",
@@ -707,16 +841,15 @@ export default function Workspace() {
                         transition: "transform 0.15s ease",
                       }}
                       title={`${item.name} (ID: ${item.id})`}
-                      onClick={() => setActivePaletteId(item.id)}
+                      onClick={() => {
+                        setActivePaletteId(item.id);
+                        setSelectedPaletteItem(item);
+                      }}
                     />
                   ))}
                   <div className="vr bg-secondary my-1"></div>
-                  <small
-                    className="text-secondary pe-2"
-                    style={{ fontSize: "11px" }}
-                  >
-                    <strong>Click:</strong> Place |{" "}
-                    <strong>Shift+Click:</strong> Delete
+                  <small className="text-secondary pe-2" style={{ fontSize: "11px" }}>
+                    <strong>Click:</strong> Place | <strong>Shift+Click:</strong> Delete
                   </small>
                 </div>
               )}
@@ -742,25 +875,24 @@ export default function Workspace() {
                       onClick={() => setSelectedVoxel(null)}
                     ></button>
                   </div>
-                  <div className="d-flex align-items-center gap-2 mb-1">
-                    <span
-                      className="d-inline-block rounded-circle"
-                      style={{
-                        width: "12px",
-                        height: "12px",
-                        backgroundColor: selectedVoxel.paletteColor,
-                      }}
-                    />
-                    <span className="fw-semibold small">
-                      {selectedVoxel.paletteName}
-                    </span>
+                  <div className="d-flex align-items-center justify-content-between gap-2 mb-1">
+                    <div className="d-flex align-items-center gap-2">
+                      <span
+                        className="d-inline-block rounded-circle"
+                        style={{ width: "12px", height: "12px", backgroundColor: selectedVoxel.paletteColor }}
+                      />
+                      <span className="fw-semibold small">{selectedVoxel.paletteName}</span>
+                    </div>
+                    <button
+                      className="btn btn-outline-info btn-sm p-0 px-1"
+                      style={{ fontSize: "10px" }}
+                      onClick={() => setShowPaletteStudio(true)}
+                    >
+                      Edit FX
+                    </button>
                   </div>
                   <div className="text-secondary font-monospace small">
-                    Position:{" "}
-                    <span className="text-light">
-                      X:{selectedVoxel.x} Y:{selectedVoxel.y} Z:
-                      {selectedVoxel.z}
-                    </span>
+                    Position: <span className="text-light">X:{selectedVoxel.x} Y:{selectedVoxel.y} Z:{selectedVoxel.z}</span>
                   </div>
                 </div>
               )}
@@ -771,11 +903,7 @@ export default function Workspace() {
 
       {/* Presets Modal */}
       {showModal && (
-        <div
-          className="modal d-block"
-          style={{ backgroundColor: "rgba(0,0,0,0.8)" }}
-          tabIndex={-1}
-        >
+        <div className="modal d-block" style={{ backgroundColor: "rgba(0,0,0,0.8)" }} tabIndex={-1}>
           <div className="modal-dialog modal-dialog-centered modal-lg">
             <div className="modal-content bg-dark border-secondary text-light">
               <div className="modal-header border-secondary d-flex justify-content-between align-items-center">
@@ -797,11 +925,7 @@ export default function Workspace() {
                     </button>
                   </li>
                 </ul>
-                <button
-                  type="button"
-                  className="btn-close btn-close-white"
-                  onClick={() => setShowModal(false)}
-                ></button>
+                <button type="button" className="btn-close btn-close-white" onClick={() => setShowModal(false)}></button>
               </div>
               <div className="modal-body">
                 {modalTab === "presets" ? (
@@ -809,31 +933,17 @@ export default function Workspace() {
                     <div className="col-12 col-md-6 col-lg-4">
                       <div className="card bg-black border-secondary h-100 text-light p-3">
                         <h6 className="text-info fw-bold mb-1">Shibuya 2099</h6>
-                        <p className="text-secondary small mb-3">
-                          Cyberpunk crossing with skybridges and monorail.
-                        </p>
-                        <button
-                          className="btn btn-outline-info btn-sm mt-auto"
-                          onClick={() =>
-                            loadStructure(generateShibuyaCrossing())
-                          }
-                        >
+                        <p className="text-secondary small mb-3">Cyberpunk crossing with skybridges and monorail.</p>
+                        <button className="btn btn-outline-info btn-sm mt-auto" onClick={() => loadStructure(generateShibuyaCrossing())}>
                           Load
                         </button>
                       </div>
                     </div>
                     <div className="col-12 col-md-6 col-lg-4">
                       <div className="card bg-black border-secondary h-100 text-light p-3">
-                        <h6 className="text-warning fw-bold mb-1">
-                          Kailash Vimana
-                        </h6>
-                        <p className="text-secondary small mb-3">
-                          Floating aerial sanctum with jagged crags.
-                        </p>
-                        <button
-                          className="btn btn-outline-warning btn-sm mt-auto"
-                          onClick={() => loadStructure(generateKailashVimana())}
-                        >
+                        <h6 className="text-warning fw-bold mb-1">Kailash Vimana</h6>
+                        <p className="text-secondary small mb-3">Floating aerial sanctum with jagged crags.</p>
+                        <button className="btn btn-outline-warning btn-sm mt-auto" onClick={() => loadStructure(generateKailashVimana())}>
                           Load
                         </button>
                       </div>
@@ -841,67 +951,35 @@ export default function Workspace() {
                     <div className="col-12 col-md-6 col-lg-4">
                       <div className="card bg-black border-secondary h-100 text-light p-3">
                         <h6 className="text-light fw-bold mb-1">Taj Mahal</h6>
-                        <p className="text-secondary small mb-3">
-                          Mughal marble monument with onion dome.
-                        </p>
-                        <button
-                          className="btn btn-outline-light btn-sm mt-auto"
-                          onClick={() => loadStructure(generateTajMahal())}
-                        >
+                        <p className="text-secondary small mb-3">Mughal marble monument with onion dome.</p>
+                        <button className="btn btn-outline-light btn-sm mt-auto" onClick={() => loadStructure(generateTajMahal())}>
                           Load
                         </button>
                       </div>
                     </div>
                     <div className="col-12 col-md-6 col-lg-4">
                       <div className="card bg-black border-secondary h-100 text-light p-3">
-                        <h6 className="text-danger fw-bold mb-1">
-                          Cyber Tower
-                        </h6>
-                        <p className="text-secondary small mb-3">
-                          Multi-tier tower with neon ads.
-                        </p>
-                        <button
-                          className="btn btn-outline-danger btn-sm mt-auto"
-                          onClick={() =>
-                            loadStructure(generateCyberSkyscraper(16, 7))
-                          }
-                        >
+                        <h6 className="text-danger fw-bold mb-1">Cyber Tower</h6>
+                        <p className="text-secondary small mb-3">Multi-tier tower with neon ads.</p>
+                        <button className="btn btn-outline-danger btn-sm mt-auto" onClick={() => loadStructure(generateCyberSkyscraper(16, 7))}>
                           Load
                         </button>
                       </div>
                     </div>
                     <div className="col-12 col-md-6 col-lg-4">
                       <div className="card bg-black border-secondary h-100 text-light p-3">
-                        <h6 className="text-primary fw-bold mb-1">
-                          Sci-Fi Portal
-                        </h6>
-                        <p className="text-secondary small mb-3">
-                          Gateway with rotating quantum horizon.
-                        </p>
-                        <button
-                          className="btn btn-outline-primary btn-sm mt-auto"
-                          onClick={() =>
-                            loadStructure(generateSciFiPortal(9, 3))
-                          }
-                        >
+                        <h6 className="text-primary fw-bold mb-1">Sci-Fi Portal</h6>
+                        <p className="text-secondary small mb-3">Gateway with rotating quantum horizon.</p>
+                        <button className="btn btn-outline-primary btn-sm mt-auto" onClick={() => loadStructure(generateSciFiPortal(9, 3))}>
                           Load
                         </button>
                       </div>
                     </div>
                     <div className="col-12 col-md-6 col-lg-4">
                       <div className="card bg-black border-secondary h-100 text-light p-3">
-                        <h6 className="text-warning fw-bold mb-1">
-                          Roman Colosseum
-                        </h6>
-                        <p className="text-secondary small mb-3">
-                          Parametric classical amphitheater.
-                        </p>
-                        <button
-                          className="btn btn-outline-warning btn-sm mt-auto"
-                          onClick={() =>
-                            loadStructure(generateRomanColosseum(11, 9))
-                          }
-                        >
+                        <h6 className="text-warning fw-bold mb-1">Roman Colosseum</h6>
+                        <p className="text-secondary small mb-3">Parametric classical amphitheater.</p>
+                        <button className="btn btn-outline-warning btn-sm mt-auto" onClick={() => loadStructure(generateRomanColosseum(11, 9))}>
                           Load
                         </button>
                       </div>
@@ -921,24 +999,14 @@ export default function Workspace() {
                             className="list-group-item bg-black border-secondary text-light d-flex justify-content-between align-items-center mb-2 rounded"
                           >
                             <div>
-                              <h6 className="mb-0 fw-bold text-primary">
-                                {item.name}
-                              </h6>
-                              <small className="text-secondary">
-                                Saved on {item.savedAt}
-                              </small>
+                              <h6 className="mb-0 fw-bold text-primary">{item.name}</h6>
+                              <small className="text-secondary">Saved on {item.savedAt}</small>
                             </div>
                             <div className="d-flex gap-2">
-                              <button
-                                className="btn btn-outline-primary btn-sm"
-                                onClick={() => loadStructure(item.data)}
-                              >
+                              <button className="btn btn-outline-primary btn-sm" onClick={() => loadStructure(item.data)}>
                                 Load
                               </button>
-                              <button
-                                className="btn btn-outline-danger btn-sm"
-                                onClick={(e) => handleDeleteSaved(item.id, e)}
-                              >
+                              <button className="btn btn-outline-danger btn-sm" onClick={(e) => handleDeleteSaved(item.id, e)}>
                                 <i className="bi bi-trash"></i>
                               </button>
                             </div>
