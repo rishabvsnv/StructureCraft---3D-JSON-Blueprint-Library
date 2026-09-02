@@ -2,15 +2,13 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import Editor from "@monaco-editor/react";
-import VoxelCanvas, {
-  VoxelCanvasHandle,
-  SelectedVoxelInfo,
-} from "./VoxelCanvas";
+import VoxelCanvas, { VoxelCanvasHandle, SelectedVoxelInfo } from "./VoxelCanvas";
 import { generateSciFiPortal } from "@/utils/generatePortal";
 import { generateRomanColosseum } from "@/utils/generateColosseum";
 import { generateCyberSkyscraper } from "@/utils/generateSkyscraper";
 import { generateTajMahal } from "@/utils/generateTajMahal";
 import { generateKailashVimana } from "@/utils/generateKailashVimana";
+import { generateShibuyaCrossing } from "@/utils/generateShibuyaCrossing";
 import { downloadJson, exportToGLTF } from "@/utils/exportUtils";
 import {
   getSavedBlueprints,
@@ -26,16 +24,18 @@ export default function Workspace() {
   const [showModal, setShowModal] = useState(false);
   const [modalTab, setModalTab] = useState<"presets" | "saved">("presets");
 
-  // Local storage blueprints
+  // Storage
   const [savedList, setSavedList] = useState<SavedBlueprintItem[]>([]);
   const [saveTitleInput, setSaveTitleInput] = useState("");
 
   // Playback & Inspector
   const [buildProgress, setBuildProgress] = useState(1.0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [selectedVoxel, setSelectedVoxel] = useState<SelectedVoxelInfo | null>(
-    null,
-  );
+  const [selectedVoxel, setSelectedVoxel] = useState<SelectedVoxelInfo | null>(null);
+
+  // Live Sculptor Mode
+  const [sculptMode, setSculptMode] = useState(false);
+  const [activePaletteId, setActivePaletteId] = useState(1);
 
   const canvasRef = useRef<VoxelCanvasHandle | null>(null);
   const workerRef = useRef<Worker | null>(null);
@@ -48,6 +48,11 @@ export default function Workspace() {
     setIsPlaying(false);
     setSelectedVoxel(null);
     setShowModal(false);
+
+    // Default to first palette id
+    if ((dataObject as any).palette?.length > 0) {
+      setActivePaletteId((dataObject as any).palette[0].id);
+    }
   };
 
   useEffect(() => {
@@ -63,26 +68,40 @@ export default function Workspace() {
       }
     };
 
-    loadStructure(generateSciFiPortal(9, 3));
+    loadStructure(generateKailashVimana());
 
     return () => {
       workerRef.current?.terminate();
     };
   }, []);
 
-  useEffect(() => {
-    if (!isPlaying) return;
-    const interval = setInterval(() => {
-      setBuildProgress((prev) => {
-        if (prev >= 1.0) {
-          setIsPlaying(false);
-          return 1.0;
-        }
-        return Math.min(1.0, prev + 0.02);
-      });
-    }, 40);
-    return () => clearInterval(interval);
-  }, [isPlaying]);
+  // Live Sculpt: Add Block
+  const handleAddVoxel = (newVoxel: { x: number; y: number; z: number; paletteId: number }) => {
+    try {
+      const parsed = JSON.parse(jsonCode);
+      parsed.voxels = [...(parsed.voxels || []), newVoxel];
+      const updatedCode = JSON.stringify(parsed, null, 2);
+      setJsonCode(updatedCode);
+      workerRef.current?.postMessage({ jsonString: updatedCode });
+    } catch (err) {
+      console.error("Failed to add voxel:", err);
+    }
+  };
+
+  // Live Sculpt: Delete Block
+  const handleDeleteVoxel = (target: { x: number; y: number; z: number }) => {
+    try {
+      const parsed = JSON.parse(jsonCode);
+      parsed.voxels = (parsed.voxels || []).filter(
+        (v: any) => !(v.x === target.x && v.y === target.y && v.z === target.z)
+      );
+      const updatedCode = JSON.stringify(parsed, null, 2);
+      setJsonCode(updatedCode);
+      workerRef.current?.postMessage({ jsonString: updatedCode });
+    } catch (err) {
+      console.error("Failed to delete voxel:", err);
+    }
+  };
 
   const handleSaveToStorage = () => {
     try {
@@ -92,25 +111,21 @@ export default function Workspace() {
       setSaveTitleInput("");
       alert("Blueprint saved to browser storage!");
     } catch {
-      alert("Please fix JSON syntax errors before saving.");
+      alert("Please fix JSON errors before saving.");
     }
   };
 
   const handleDeleteSaved = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    const updated = deleteBlueprintFromStorage(id);
-    setSavedList(updated);
+    setSavedList(deleteBlueprintFromStorage(id));
   };
 
   const handleExportJson = () => {
     try {
       const parsed = JSON.parse(jsonCode);
-      downloadJson(
-        parsed,
-        `${parsed.title?.toLowerCase().replace(/\s+/g, "_") || "structure"}.json`,
-      );
+      downloadJson(parsed, `${parsed.title?.toLowerCase().replace(/\s+/g, "_") || "structure"}.json`);
     } catch {
-      alert("Please fix JSON syntax errors before exporting.");
+      alert("Please fix JSON errors before exporting.");
     }
   };
 
@@ -121,22 +136,31 @@ export default function Workspace() {
 
   return (
     <div className="d-flex flex-column vh-100 bg-black">
-      {/* Navbar Header */}
+      {/* Top Navbar */}
       <nav className="navbar navbar-expand navbar-dark bg-dark border-bottom border-secondary px-3 py-2">
         <div className="container-fluid p-0 d-flex justify-content-between align-items-center">
           <div className="d-flex align-items-center gap-2">
             <i className="bi bi-boxes text-primary fs-4"></i>
-            <span className="navbar-brand fw-bold mb-0 fs-6">
-              StructureCraft
-            </span>
+            <span className="navbar-brand fw-bold mb-0 fs-6">StructureCraft</span>
           </div>
 
           <div className="d-flex align-items-center gap-2">
+            {/* Sculptor Toggle Button */}
+            <button
+              className={`btn btn-sm d-flex align-items-center gap-1 ${
+                sculptMode ? "btn-danger fw-bold" : "btn-outline-primary"
+              }`}
+              onClick={() => setSculptMode(!sculptMode)}
+            >
+              <i className={`bi ${sculptMode ? "bi-hammer" : "bi-pencil-square"}`}></i>
+              {sculptMode ? "Sculpting Active" : "Sculpt Mode"}
+            </button>
+
             <button
               className="btn btn-outline-light btn-sm d-flex align-items-center gap-1"
               onClick={() => setShowModal(true)}
             >
-              <i className="bi bi-folder2-open"></i> Blueprint Library
+              <i className="bi bi-folder2-open"></i> Presets
             </button>
 
             <button
@@ -154,7 +178,7 @@ export default function Workspace() {
                 <i className="bi bi-download"></i> JSON
               </button>
               <button
-                className="btn btn-outline-primary btn-sm d-flex align-items-center gap-1"
+                className="btn btn-outline-info btn-sm d-flex align-items-center gap-1"
                 onClick={handleExportGLTF}
               >
                 <i className="bi bi-file-earmark-code"></i> GLTF
@@ -163,8 +187,7 @@ export default function Workspace() {
 
             {errorStatus ? (
               <span className="badge bg-danger-subtle text-danger border border-danger px-3 py-2 ms-2">
-                <i className="bi bi-exclamation-triangle-fill me-1"></i>{" "}
-                {errorStatus}
+                <i className="bi bi-exclamation-triangle-fill me-1"></i> {errorStatus}
               </span>
             ) : (
               <span className="badge bg-success-subtle text-success border border-success px-3 py-2 ms-2">
@@ -175,10 +198,10 @@ export default function Workspace() {
         </div>
       </nav>
 
-      {/* Main Split View */}
+      {/* Main Split Interface */}
       <div className="container-fluid flex-grow-1 p-0 overflow-hidden">
         <div className="row g-0 h-100">
-          {/* Left: Code Editor */}
+          {/* Left Monaco Code Editor */}
           <div className="col-12 col-lg-6 d-flex flex-column border-end border-secondary h-100">
             <div className="flex-grow-1">
               <Editor
@@ -200,41 +223,38 @@ export default function Workspace() {
             </div>
           </div>
 
-          {/* Right: 3D Viewport with Toolbar & Inspector Overlay */}
+          {/* Right 3D Viewport with Live Building Docks */}
           <div className="col-12 col-lg-6 d-flex flex-column bg-black h-100 position-relative">
-            {/* Viewport Top Bar */}
+            {/* Top Toolbar */}
             <div className="bg-dark bg-opacity-75 px-3 py-2 border-bottom border-secondary d-flex justify-content-between align-items-center">
               <div className="btn-group btn-group-sm">
                 <button
                   className="btn btn-outline-secondary"
                   onClick={() => canvasRef.current?.setCameraView("iso")}
-                  title="Isometric"
                 >
-                  <i className="bi bi-bounding-box me-1"></i> Iso
+                  Iso
                 </button>
                 <button
                   className="btn btn-outline-secondary"
                   onClick={() => canvasRef.current?.setCameraView("top")}
-                  title="Top View"
                 >
-                  <i className="bi bi-arrow-down-square me-1"></i> Top
+                  Top
                 </button>
                 <button
                   className="btn btn-outline-secondary"
                   onClick={() => canvasRef.current?.setCameraView("front")}
-                  title="Front View"
                 >
-                  <i className="bi bi-aspect-ratio me-1"></i> Front
+                  Front
                 </button>
                 <button
                   className="btn btn-outline-secondary"
                   onClick={() => canvasRef.current?.resetCamera()}
-                  title="Reset Camera"
                 >
                   <i className="bi bi-arrow-counterclockwise"></i>
                 </button>
               </div>
 
+              {/* Build Animation Slider */}
               <div className="d-flex align-items-center gap-2">
                 <button
                   className={`btn btn-sm ${isPlaying ? "btn-danger" : "btn-primary"} px-2 py-0`}
@@ -243,14 +263,12 @@ export default function Workspace() {
                     setIsPlaying(!isPlaying);
                   }}
                 >
-                  <i
-                    className={`bi ${isPlaying ? "bi-pause-fill" : "bi-play-fill"}`}
-                  ></i>
+                  <i className={`bi ${isPlaying ? "bi-pause-fill" : "bi-play-fill"}`}></i>
                 </button>
                 <input
                   type="range"
                   className="form-range"
-                  style={{ width: "120px" }}
+                  style={{ width: "100px" }}
                   min="0"
                   max="1"
                   step="0.01"
@@ -260,34 +278,59 @@ export default function Workspace() {
                     setBuildProgress(parseFloat(e.target.value));
                   }}
                 />
-                <small
-                  className="text-secondary font-monospace"
-                  style={{ minWidth: "38px" }}
-                >
-                  {Math.round(buildProgress * 100)}%
-                </small>
               </div>
             </div>
 
-            {/* Viewport Canvas */}
+            {/* 3D Canvas */}
             <div className="flex-grow-1 position-relative w-100 h-100">
               <VoxelCanvas
                 ref={canvasRef}
                 compilerData={compilerOutput}
                 buildProgress={buildProgress}
+                sculptMode={sculptMode}
+                activePaletteId={activePaletteId}
                 onSelectVoxel={(info) => setSelectedVoxel(info)}
+                onAddVoxel={handleAddVoxel}
+                onDeleteVoxel={handleDeleteVoxel}
               />
 
-              {/* Block Inspector Badge Overlay */}
-              {selectedVoxel && (
+              {/* Bottom Dock: Palette Swatch Selector (Active during Sculpt Mode) */}
+              {sculptMode && compilerOutput?.palette && (
+                <div
+                  className="position-absolute bottom-0 start-50 translate-middle-x mb-3 p-2 rounded-pill bg-dark border border-secondary shadow-lg d-flex align-items-center gap-2"
+                  style={{ zIndex: 10, backdropFilter: "blur(8px)", backgroundColor: "rgba(18,20,24,0.9)" }}
+                >
+                  <span className="badge text-secondary small px-2">
+                    <i className="bi bi-palette me-1"></i> Block:
+                  </span>
+                  {compilerOutput.palette.map((item: any) => (
+                    <button
+                      key={item.id}
+                      className={`btn p-0 rounded-circle border ${
+                        activePaletteId === item.id ? "border-white border-2 scale-110 shadow" : "border-dark opacity-75"
+                      }`}
+                      style={{
+                        width: "26px",
+                        height: "26px",
+                        backgroundColor: item.color,
+                        transition: "transform 0.15s ease",
+                      }}
+                      title={`${item.name} (ID: ${item.id})`}
+                      onClick={() => setActivePaletteId(item.id)}
+                    />
+                  ))}
+                  <div className="vr bg-secondary my-1"></div>
+                  <small className="text-secondary pe-2" style={{ fontSize: "11px" }}>
+                    <strong>Click:</strong> Place | <strong>Shift+Click:</strong> Delete
+                  </small>
+                </div>
+              )}
+
+              {/* Block Inspector Badge */}
+              {!sculptMode && selectedVoxel && (
                 <div
                   className="position-absolute bottom-0 start-0 m-3 p-3 rounded bg-dark border border-secondary shadow-lg text-light"
-                  style={{
-                    minWidth: "220px",
-                    zIndex: 10,
-                    backdropFilter: "blur(6px)",
-                    backgroundColor: "rgba(18,20,24,0.85)",
-                  }}
+                  style={{ minWidth: "220px", zIndex: 10, backdropFilter: "blur(6px)", backgroundColor: "rgba(18,20,24,0.85)" }}
                 >
                   <div className="d-flex justify-content-between align-items-center mb-2 pb-1 border-bottom border-secondary">
                     <small className="fw-bold text-uppercase text-secondary font-monospace">
@@ -302,22 +345,12 @@ export default function Workspace() {
                   <div className="d-flex align-items-center gap-2 mb-1">
                     <span
                       className="d-inline-block rounded-circle"
-                      style={{
-                        width: "12px",
-                        height: "12px",
-                        backgroundColor: selectedVoxel.paletteColor,
-                      }}
+                      style={{ width: "12px", height: "12px", backgroundColor: selectedVoxel.paletteColor }}
                     />
-                    <span className="fw-semibold small">
-                      {selectedVoxel.paletteName}
-                    </span>
+                    <span className="fw-semibold small">{selectedVoxel.paletteName}</span>
                   </div>
                   <div className="text-secondary font-monospace small">
-                    Position:{" "}
-                    <span className="text-light">
-                      X:{selectedVoxel.x} Y:{selectedVoxel.y} Z:
-                      {selectedVoxel.z}
-                    </span>
+                    Position: <span className="text-light">X:{selectedVoxel.x} Y:{selectedVoxel.y} Z:{selectedVoxel.z}</span>
                   </div>
                 </div>
               )}
@@ -326,13 +359,9 @@ export default function Workspace() {
         </div>
       </div>
 
-      {/* Blueprint Library Modal (Presets & LocalStorage) */}
+      {/* Preset & Storage Modal */}
       {showModal && (
-        <div
-          className="modal d-block"
-          style={{ backgroundColor: "rgba(0,0,0,0.8)" }}
-          tabIndex={-1}
-        >
+        <div className="modal d-block" style={{ backgroundColor: "rgba(0,0,0,0.8)" }} tabIndex={-1}>
           <div className="modal-dialog modal-dialog-centered modal-lg">
             <div className="modal-content bg-dark border-secondary text-light">
               <div className="modal-header border-secondary d-flex justify-content-between align-items-center">
@@ -342,7 +371,7 @@ export default function Workspace() {
                       className={`nav-link py-1 px-3 ${modalTab === "presets" ? "active" : "text-light"}`}
                       onClick={() => setModalTab("presets")}
                     >
-                      <i className="bi bi-box-seam me-1"></i> Stock Presets
+                      Stock Presets
                     </button>
                   </li>
                   <li className="nav-item">
@@ -350,112 +379,57 @@ export default function Workspace() {
                       className={`nav-link py-1 px-3 ${modalTab === "saved" ? "active" : "text-light"}`}
                       onClick={() => setModalTab("saved")}
                     >
-                      <i className="bi bi-bookmark-check me-1"></i> My Saved (
-                      {savedList.length})
+                      My Saved ({savedList.length})
                     </button>
                   </li>
                 </ul>
-                <button
-                  type="button"
-                  className="btn-close btn-close-white"
-                  onClick={() => setShowModal(false)}
-                ></button>
+                <button type="button" className="btn-close btn-close-white" onClick={() => setShowModal(false)}></button>
               </div>
-
               <div className="modal-body">
                 {modalTab === "presets" ? (
                   <div className="row g-3">
-                    <div className="col-12 col-md-4">
-                      <div className="card bg-black border-secondary h-100 text-light p-3">
-                        <h6 className="text-info fw-bold mb-1">
-                          <i className="bi bi-radioactive me-1"></i> Sci-Fi
-                          Portal
-                        </h6>
-                        <p className="text-secondary small mb-3">
-                          Gateway with rotating quantum event horizon.
-                        </p>
-                        <button
-                          className="btn btn-info btn-sm mt-auto"
-                          onClick={() =>
-                            loadStructure(generateSciFiPortal(9, 3))
-                          }
-                        >
-                          Load Portal
-                        </button>
-                      </div>
-                    </div>
-                    <div className="col-12 col-md-4">
-                      <div className="card bg-black border-secondary h-100 text-light p-3">
-                        <h6 className="text-warning fw-bold mb-1">
-                          <i className="bi bi-bank me-1"></i> Colosseum
-                        </h6>
-                        <p className="text-secondary small mb-3">
-                          Parametric Roman amphitheater with classical arched
-                          tiers.
-                        </p>
-                        <button
-                          className="btn btn-warning btn-sm mt-auto"
-                          onClick={() =>
-                            loadStructure(generateRomanColosseum(11, 9))
-                          }
-                        >
-                          Load Colosseum
-                        </button>
-                      </div>
-                    </div>
-                    <div className="col-12 col-md-4">
-                      <div className="card bg-black border-secondary h-100 text-light p-3">
-                        <h6 className="text-danger fw-bold mb-1">
-                          <i className="bi bi-building me-1"></i> Cyber Tower
-                        </h6>
-                        <p className="text-secondary small mb-3">
-                          Multi-tiered skyscraper with neon office windows.
-                        </p>
-                        <button
-                          className="btn btn-danger btn-sm mt-auto"
-                          onClick={() =>
-                            loadStructure(generateCyberSkyscraper(16, 7))
-                          }
-                        >
-                          Load Skyscraper
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="col-12 col-md-4">
-                      <div className="card bg-black border-secondary h-100 text-light p-3">
-                        <h6 className="text-light fw-bold mb-1">
-                          <i className="bi bi-moon-stars me-1 text-warning"></i>{" "}
-                          Taj Mahal
-                        </h6>
-                        <p className="text-secondary small mb-3">
-                          Mughal ivory-white marble monument with corner
-                          minarets and an onion dome.
-                        </p>
-                        <button
-                          className="btn btn-outline-light btn-sm mt-auto"
-                          onClick={() => loadStructure(generateTajMahal())}
-                        >
-                          Load Taj Mahal
-                        </button>
-                      </div>
-                    </div>
-
                     <div className="col-12 col-md-6 col-lg-3">
                       <div className="card bg-black border-secondary h-100 text-light p-3">
-                        <h6 className="text-warning fw-bold mb-1">
-                          <i className="bi bi-clouds me-1 text-info"></i>{" "}
-                          Kailash Vimana
-                        </h6>
-                        <p className="text-secondary small mb-3">
-                          Floating aerial sanctum with jagged crags, falling
-                          water, and a glowing gravity ring.
-                        </p>
-                        <button
-                          className="btn btn-outline-warning btn-sm mt-auto"
-                          onClick={() => loadStructure(generateKailashVimana())}
-                        >
-                          Load Sanctum
+                        <h6 className="text-warning fw-bold mb-1">Kailash Vimana</h6>
+                        <p className="text-secondary small mb-3">Floating aerial sanctum with jagged crags.</p>
+                        <button className="btn btn-outline-warning btn-sm mt-auto" onClick={() => loadStructure(generateKailashVimana())}>
+                          Load
+                        </button>
+                      </div>
+                    </div>
+                    <div className="col-12 col-md-6 col-lg-3">
+                      <div className="card bg-black border-secondary h-100 text-light p-3">
+                        <h6 className="text-light fw-bold mb-1">Taj Mahal</h6>
+                        <p className="text-secondary small mb-3">Mughal marble monument with onion dome.</p>
+                        <button className="btn btn-outline-light btn-sm mt-auto" onClick={() => loadStructure(generateTajMahal())}>
+                          Load
+                        </button>
+                      </div>
+                    </div>
+                    <div className="col-12 col-md-6 col-lg-3">
+                      <div className="card bg-black border-secondary h-100 text-light p-3">
+                        <h6 className="text-danger fw-bold mb-1">Cyber Tower</h6>
+                        <p className="text-secondary small mb-3">Multi-tier tower with neon ads.</p>
+                        <button className="btn btn-outline-danger btn-sm mt-auto" onClick={() => loadStructure(generateCyberSkyscraper(16, 7))}>
+                          Load
+                        </button>
+                      </div>
+                    </div>
+                    <div className="col-12 col-md-6 col-lg-3">
+                      <div className="card bg-black border-secondary h-100 text-light p-3">
+                        <h6 className="text-info fw-bold mb-1">Sci-Fi Portal</h6>
+                        <p className="text-secondary small mb-3">Gateway with rotating quantum horizon.</p>
+                        <button className="btn btn-outline-info btn-sm mt-auto" onClick={() => loadStructure(generateSciFiPortal(9, 3))}>
+                          Load
+                        </button>
+                      </div>
+                    </div>
+                    <div className="col-12 col-md-6 col-lg-3">
+                      <div className="card bg-black border-secondary h-100 text-light p-3">
+                        <h6 className="text-info fw-bold mb-1">Shibuya Crossing</h6>
+                        <p className="text-secondary small mb-3">Futuristic intersection with neon lights.</p>
+                        <button className="btn btn-outline-info btn-sm mt-auto" onClick={() => loadStructure(generateShibuyaCrossing())}>
+                          Load
                         </button>
                       </div>
                     </div>
@@ -464,10 +438,7 @@ export default function Workspace() {
                   <div>
                     {savedList.length === 0 ? (
                       <div className="text-center py-5 text-secondary">
-                        <i className="bi bi-folder-x fs-1 mb-2 d-block"></i>
-                        No custom blueprints saved yet. Click the{" "}
-                        <strong>Save</strong> button in the top bar to store
-                        your current structure!
+                        No custom blueprints saved yet.
                       </div>
                     ) : (
                       <div className="list-group list-group-flush">
@@ -477,24 +448,14 @@ export default function Workspace() {
                             className="list-group-item bg-black border-secondary text-light d-flex justify-content-between align-items-center mb-2 rounded"
                           >
                             <div>
-                              <h6 className="mb-0 fw-bold text-primary">
-                                {item.name}
-                              </h6>
-                              <small className="text-secondary">
-                                Saved on {item.savedAt}
-                              </small>
+                              <h6 className="mb-0 fw-bold text-primary">{item.name}</h6>
+                              <small className="text-secondary">Saved on {item.savedAt}</small>
                             </div>
                             <div className="d-flex gap-2">
-                              <button
-                                className="btn btn-outline-primary btn-sm"
-                                onClick={() => loadStructure(item.data)}
-                              >
+                              <button className="btn btn-outline-primary btn-sm" onClick={() => loadStructure(item.data)}>
                                 Load
                               </button>
-                              <button
-                                className="btn btn-outline-danger btn-sm"
-                                onClick={(e) => handleDeleteSaved(item.id, e)}
-                              >
+                              <button className="btn btn-outline-danger btn-sm" onClick={(e) => handleDeleteSaved(item.id, e)}>
                                 <i className="bi bi-trash"></i>
                               </button>
                             </div>
