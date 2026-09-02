@@ -2,10 +2,15 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import Editor from "@monaco-editor/react";
-import VoxelCanvas, { VoxelCanvasHandle, SelectedVoxelInfo } from "./VoxelCanvas";
+import VoxelCanvas, {
+  VoxelCanvasHandle,
+  SelectedVoxelInfo,
+} from "./VoxelCanvas";
 import { generateSciFiPortal } from "@/utils/generatePortal";
 import { generateRomanColosseum } from "@/utils/generateColosseum";
 import { generateCyberSkyscraper } from "@/utils/generateSkyscraper";
+import { generateTajMahal } from "@/utils/generateTajMahal";
+import { generateKailashVimana } from "@/utils/generateKailashVimana";
 import { downloadJson, exportToGLTF } from "@/utils/exportUtils";
 import {
   getSavedBlueprints,
@@ -28,7 +33,9 @@ export default function Workspace() {
   // Playback & Inspector
   const [buildProgress, setBuildProgress] = useState(1.0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [selectedVoxel, setSelectedVoxel] = useState<SelectedVoxelInfo | null>(null);
+  const [selectedVoxel, setSelectedVoxel] = useState<SelectedVoxelInfo | null>(
+    null,
+  );
 
   const canvasRef = useRef<VoxelCanvasHandle | null>(null);
   const workerRef = useRef<Worker | null>(null);
@@ -98,7 +105,10 @@ export default function Workspace() {
   const handleExportJson = () => {
     try {
       const parsed = JSON.parse(jsonCode);
-      downloadJson(parsed, `${parsed.title?.toLowerCase().replace(/\s+/g, "_") || "structure"}.json`);
+      downloadJson(
+        parsed,
+        `${parsed.title?.toLowerCase().replace(/\s+/g, "_") || "structure"}.json`,
+      );
     } catch {
       alert("Please fix JSON syntax errors before exporting.");
     }
@@ -116,7 +126,9 @@ export default function Workspace() {
         <div className="container-fluid p-0 d-flex justify-content-between align-items-center">
           <div className="d-flex align-items-center gap-2">
             <i className="bi bi-boxes text-primary fs-4"></i>
-            <span className="navbar-brand fw-bold mb-0 fs-6">StructureCraft</span>
+            <span className="navbar-brand fw-bold mb-0 fs-6">
+              StructureCraft
+            </span>
           </div>
 
           <div className="d-flex align-items-center gap-2">
@@ -151,7 +163,8 @@ export default function Workspace() {
 
             {errorStatus ? (
               <span className="badge bg-danger-subtle text-danger border border-danger px-3 py-2 ms-2">
-                <i className="bi bi-exclamation-triangle-fill me-1"></i> {errorStatus}
+                <i className="bi bi-exclamation-triangle-fill me-1"></i>{" "}
+                {errorStatus}
               </span>
             ) : (
               <span className="badge bg-success-subtle text-success border border-success px-3 py-2 ms-2">
@@ -230,7 +243,9 @@ export default function Workspace() {
                     setIsPlaying(!isPlaying);
                   }}
                 >
-                  <i className={`bi ${isPlaying ? "bi-pause-fill" : "bi-play-fill"}`}></i>
+                  <i
+                    className={`bi ${isPlaying ? "bi-pause-fill" : "bi-play-fill"}`}
+                  ></i>
                 </button>
                 <input
                   type="range"
@@ -245,7 +260,10 @@ export default function Workspace() {
                     setBuildProgress(parseFloat(e.target.value));
                   }}
                 />
-                <small className="text-secondary font-monospace" style={{ minWidth: "38px" }}>
+                <small
+                  className="text-secondary font-monospace"
+                  style={{ minWidth: "38px" }}
+                >
                   {Math.round(buildProgress * 100)}%
                 </small>
               </div>
@@ -264,7 +282,12 @@ export default function Workspace() {
               {selectedVoxel && (
                 <div
                   className="position-absolute bottom-0 start-0 m-3 p-3 rounded bg-dark border border-secondary shadow-lg text-light"
-                  style={{ minWidth: "220px", zIndex: 10, backdropFilter: "blur(6px)", backgroundColor: "rgba(18,20,24,0.85)" }}
+                  style={{
+                    minWidth: "220px",
+                    zIndex: 10,
+                    backdropFilter: "blur(6px)",
+                    backgroundColor: "rgba(18,20,24,0.85)",
+                  }}
                 >
                   <div className="d-flex justify-content-between align-items-center mb-2 pb-1 border-bottom border-secondary">
                     <small className="fw-bold text-uppercase text-secondary font-monospace">
@@ -279,12 +302,22 @@ export default function Workspace() {
                   <div className="d-flex align-items-center gap-2 mb-1">
                     <span
                       className="d-inline-block rounded-circle"
-                      style={{ width: "12px", height: "12px", backgroundColor: selectedVoxel.paletteColor }}
+                      style={{
+                        width: "12px",
+                        height: "12px",
+                        backgroundColor: selectedVoxel.paletteColor,
+                      }}
                     />
-                    <span className="fw-semibold small">{selectedVoxel.paletteName}</span>
+                    <span className="fw-semibold small">
+                      {selectedVoxel.paletteName}
+                    </span>
                   </div>
                   <div className="text-secondary font-monospace small">
-                    Position: <span className="text-light">X:{selectedVoxel.x} Y:{selectedVoxel.y} Z:{selectedVoxel.z}</span>
+                    Position:{" "}
+                    <span className="text-light">
+                      X:{selectedVoxel.x} Y:{selectedVoxel.y} Z:
+                      {selectedVoxel.z}
+                    </span>
                   </div>
                 </div>
               )}
@@ -295,7 +328,11 @@ export default function Workspace() {
 
       {/* Blueprint Library Modal (Presets & LocalStorage) */}
       {showModal && (
-        <div className="modal d-block" style={{ backgroundColor: "rgba(0,0,0,0.8)" }} tabIndex={-1}>
+        <div
+          className="modal d-block"
+          style={{ backgroundColor: "rgba(0,0,0,0.8)" }}
+          tabIndex={-1}
+        >
           <div className="modal-dialog modal-dialog-centered modal-lg">
             <div className="modal-content bg-dark border-secondary text-light">
               <div className="modal-header border-secondary d-flex justify-content-between align-items-center">
@@ -313,11 +350,16 @@ export default function Workspace() {
                       className={`nav-link py-1 px-3 ${modalTab === "saved" ? "active" : "text-light"}`}
                       onClick={() => setModalTab("saved")}
                     >
-                      <i className="bi bi-bookmark-check me-1"></i> My Saved ({savedList.length})
+                      <i className="bi bi-bookmark-check me-1"></i> My Saved (
+                      {savedList.length})
                     </button>
                   </li>
                 </ul>
-                <button type="button" className="btn-close btn-close-white" onClick={() => setShowModal(false)}></button>
+                <button
+                  type="button"
+                  className="btn-close btn-close-white"
+                  onClick={() => setShowModal(false)}
+                ></button>
               </div>
 
               <div className="modal-body">
@@ -326,10 +368,18 @@ export default function Workspace() {
                     <div className="col-12 col-md-4">
                       <div className="card bg-black border-secondary h-100 text-light p-3">
                         <h6 className="text-info fw-bold mb-1">
-                          <i className="bi bi-radioactive me-1"></i> Sci-Fi Portal
+                          <i className="bi bi-radioactive me-1"></i> Sci-Fi
+                          Portal
                         </h6>
-                        <p className="text-secondary small mb-3">Gateway with rotating quantum event horizon.</p>
-                        <button className="btn btn-info btn-sm mt-auto" onClick={() => loadStructure(generateSciFiPortal(9, 3))}>
+                        <p className="text-secondary small mb-3">
+                          Gateway with rotating quantum event horizon.
+                        </p>
+                        <button
+                          className="btn btn-info btn-sm mt-auto"
+                          onClick={() =>
+                            loadStructure(generateSciFiPortal(9, 3))
+                          }
+                        >
                           Load Portal
                         </button>
                       </div>
@@ -339,8 +389,16 @@ export default function Workspace() {
                         <h6 className="text-warning fw-bold mb-1">
                           <i className="bi bi-bank me-1"></i> Colosseum
                         </h6>
-                        <p className="text-secondary small mb-3">Parametric Roman amphitheater with classical arched tiers.</p>
-                        <button className="btn btn-warning btn-sm mt-auto" onClick={() => loadStructure(generateRomanColosseum(11, 9))}>
+                        <p className="text-secondary small mb-3">
+                          Parametric Roman amphitheater with classical arched
+                          tiers.
+                        </p>
+                        <button
+                          className="btn btn-warning btn-sm mt-auto"
+                          onClick={() =>
+                            loadStructure(generateRomanColosseum(11, 9))
+                          }
+                        >
                           Load Colosseum
                         </button>
                       </div>
@@ -350,9 +408,54 @@ export default function Workspace() {
                         <h6 className="text-danger fw-bold mb-1">
                           <i className="bi bi-building me-1"></i> Cyber Tower
                         </h6>
-                        <p className="text-secondary small mb-3">Multi-tiered skyscraper with neon office windows.</p>
-                        <button className="btn btn-danger btn-sm mt-auto" onClick={() => loadStructure(generateCyberSkyscraper(16, 7))}>
+                        <p className="text-secondary small mb-3">
+                          Multi-tiered skyscraper with neon office windows.
+                        </p>
+                        <button
+                          className="btn btn-danger btn-sm mt-auto"
+                          onClick={() =>
+                            loadStructure(generateCyberSkyscraper(16, 7))
+                          }
+                        >
                           Load Skyscraper
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="col-12 col-md-4">
+                      <div className="card bg-black border-secondary h-100 text-light p-3">
+                        <h6 className="text-light fw-bold mb-1">
+                          <i className="bi bi-moon-stars me-1 text-warning"></i>{" "}
+                          Taj Mahal
+                        </h6>
+                        <p className="text-secondary small mb-3">
+                          Mughal ivory-white marble monument with corner
+                          minarets and an onion dome.
+                        </p>
+                        <button
+                          className="btn btn-outline-light btn-sm mt-auto"
+                          onClick={() => loadStructure(generateTajMahal())}
+                        >
+                          Load Taj Mahal
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="col-12 col-md-6 col-lg-3">
+                      <div className="card bg-black border-secondary h-100 text-light p-3">
+                        <h6 className="text-warning fw-bold mb-1">
+                          <i className="bi bi-clouds me-1 text-info"></i>{" "}
+                          Kailash Vimana
+                        </h6>
+                        <p className="text-secondary small mb-3">
+                          Floating aerial sanctum with jagged crags, falling
+                          water, and a glowing gravity ring.
+                        </p>
+                        <button
+                          className="btn btn-outline-warning btn-sm mt-auto"
+                          onClick={() => loadStructure(generateKailashVimana())}
+                        >
+                          Load Sanctum
                         </button>
                       </div>
                     </div>
@@ -362,7 +465,9 @@ export default function Workspace() {
                     {savedList.length === 0 ? (
                       <div className="text-center py-5 text-secondary">
                         <i className="bi bi-folder-x fs-1 mb-2 d-block"></i>
-                        No custom blueprints saved yet. Click the <strong>Save</strong> button in the top bar to store your current structure!
+                        No custom blueprints saved yet. Click the{" "}
+                        <strong>Save</strong> button in the top bar to store
+                        your current structure!
                       </div>
                     ) : (
                       <div className="list-group list-group-flush">
@@ -372,14 +477,24 @@ export default function Workspace() {
                             className="list-group-item bg-black border-secondary text-light d-flex justify-content-between align-items-center mb-2 rounded"
                           >
                             <div>
-                              <h6 className="mb-0 fw-bold text-primary">{item.name}</h6>
-                              <small className="text-secondary">Saved on {item.savedAt}</small>
+                              <h6 className="mb-0 fw-bold text-primary">
+                                {item.name}
+                              </h6>
+                              <small className="text-secondary">
+                                Saved on {item.savedAt}
+                              </small>
                             </div>
                             <div className="d-flex gap-2">
-                              <button className="btn btn-outline-primary btn-sm" onClick={() => loadStructure(item.data)}>
+                              <button
+                                className="btn btn-outline-primary btn-sm"
+                                onClick={() => loadStructure(item.data)}
+                              >
                                 Load
                               </button>
-                              <button className="btn btn-outline-danger btn-sm" onClick={(e) => handleDeleteSaved(item.id, e)}>
+                              <button
+                                className="btn btn-outline-danger btn-sm"
+                                onClick={(e) => handleDeleteSaved(item.id, e)}
+                              >
                                 <i className="bi bi-trash"></i>
                               </button>
                             </div>
