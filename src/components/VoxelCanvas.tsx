@@ -1,16 +1,21 @@
 "use client";
 
-import React, {
-  useRef,
-  useEffect,
-  useImperativeHandle,
-  forwardRef,
-} from "react";
+import React, { useRef, useEffect, useImperativeHandle, forwardRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+
+export interface EnvironmentSettings {
+  preset: "space" | "sunset" | "cyber" | "studio";
+  bgColor: string;
+  sunAngle: number; // 0 to 360 degrees
+  sunElevation: number; // 10 to 90 degrees
+  sunIntensity: number; // 0.1 to 2.5
+  fogDensity: number; // 0.0 to 0.05
+  bloomStrength: number; // 0.0 to 2.0
+}
 
 export interface VoxelCanvasHandle {
   setCameraView: (view: "iso" | "top" | "front" | "side") => void;
@@ -41,13 +46,9 @@ interface VoxelCanvasProps {
   buildProgress?: number;
   activePaletteId: number;
   sculptMode: boolean;
+  environmentConfig: EnvironmentSettings;
   onSelectVoxel?: (info: SelectedVoxelInfo | null) => void;
-  onAddVoxel?: (voxel: {
-    x: number;
-    y: number;
-    z: number;
-    paletteId: number;
-  }) => void;
+  onAddVoxel?: (voxel: { x: number; y: number; z: number; paletteId: number }) => void;
   onDeleteVoxel?: (target: { x: number; y: number; z: number }) => void;
 }
 
@@ -58,16 +59,22 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
       buildProgress = 1.0,
       activePaletteId,
       sculptMode,
+      environmentConfig,
       onSelectVoxel,
       onAddVoxel,
       onDeleteVoxel,
     },
-    ref,
+    ref
   ) => {
     const mountRef = useRef<HTMLDivElement>(null);
     const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
     const controlsRef = useRef<OrbitControls | null>(null);
     const centerRef = useRef<THREE.Vector3>(new THREE.Vector3());
+
+    // Dynamic scene references for live tweaking without rebuilding the entire canvas
+    const sceneRef = useRef<THREE.Scene | null>(null);
+    const dirLightRef = useRef<THREE.DirectionalLight | null>(null);
+    const bloomPassRef = useRef<UnrealBloomPass | null>(null);
 
     useImperativeHandle(ref, () => ({
       setCameraView: (view) => {
@@ -78,7 +85,7 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
         const maxDim = Math.max(
           compilerData.dimensions.x,
           compilerData.dimensions.y,
-          compilerData.dimensions.z,
+          compilerData.dimensions.z
         );
         const center = centerRef.current;
         controls.target.copy(center);
@@ -98,7 +105,7 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
             camera.position.set(
               center.x + maxDim * 1.5,
               center.y + maxDim * 1.3,
-              center.z + maxDim * 1.5,
+              center.z + maxDim * 1.5
             );
             break;
         }
@@ -111,18 +118,52 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
         const maxDim = Math.max(
           compilerData.dimensions.x,
           compilerData.dimensions.y,
-          compilerData.dimensions.z,
+          compilerData.dimensions.z
         );
         const center = centerRef.current;
-        camera.position.set(
-          center.x + maxDim * 1.5,
-          center.y + maxDim * 1.3,
-          center.z + maxDim * 1.5,
-        );
+        camera.position.set(center.x + maxDim * 1.5, center.y + maxDim * 1.3, center.z + maxDim * 1.5);
         controls.target.copy(center);
         controls.update();
       },
     }));
+
+    // Live environment updates without rebuilding meshes
+    useEffect(() => {
+      if (!sceneRef.current || !dirLightRef.current || !compilerData) return;
+
+      const scene = sceneRef.current;
+      const dirLight = dirLightRef.current;
+
+      // Update background and atmospheric fog
+      scene.background = new THREE.Color(environmentConfig.bgColor);
+      if (environmentConfig.fogDensity > 0) {
+        scene.fog = new THREE.FogExp2(environmentConfig.bgColor, environmentConfig.fogDensity);
+      } else {
+        scene.fog = null;
+      }
+
+      // Update Directional Sun position based on azimuth & elevation
+      const maxDim = Math.max(
+        compilerData.dimensions.x,
+        compilerData.dimensions.y,
+        compilerData.dimensions.z
+      );
+      const radAzimuth = (environmentConfig.sunAngle * Math.PI) / 180;
+      const radElevation = (environmentConfig.sunElevation * Math.PI) / 180;
+      const distance = maxDim * 2.5;
+
+      const sunX = centerRef.current.x + distance * Math.cos(radElevation) * Math.sin(radAzimuth);
+      const sunY = centerRef.current.y + distance * Math.sin(radElevation);
+      const sunZ = centerRef.current.z + distance * Math.cos(radElevation) * Math.cos(radAzimuth);
+
+      dirLight.position.set(sunX, sunY, sunZ);
+      dirLight.intensity = environmentConfig.sunIntensity;
+
+      // Update bloom strength
+      if (bloomPassRef.current) {
+        bloomPassRef.current.strength = environmentConfig.bloomStrength;
+      }
+    }, [environmentConfig, compilerData]);
 
     useEffect(() => {
       const container = mountRef.current;
@@ -139,19 +180,19 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
       const maxDim = Math.max(
         compilerData.dimensions.x,
         compilerData.dimensions.y,
-        compilerData.dimensions.z,
+        compilerData.dimensions.z
       );
 
       // 1. Scene, Camera & Renderer
       const scene = new THREE.Scene();
-      scene.background = new THREE.Color("#08090d");
+      scene.background = new THREE.Color(environmentConfig.bgColor);
+      if (environmentConfig.fogDensity > 0) {
+        scene.fog = new THREE.FogExp2(environmentConfig.bgColor, environmentConfig.fogDensity);
+      }
+      sceneRef.current = scene;
 
       const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
-      camera.position.set(
-        centerX + maxDim * 1.5,
-        centerY + maxDim * 1.3,
-        centerZ + maxDim * 1.5,
-      );
+      camera.position.set(centerX + maxDim * 1.5, centerY + maxDim * 1.3, centerZ + maxDim * 1.5);
       cameraRef.current = camera;
 
       const renderer = new THREE.WebGLRenderer({
@@ -169,35 +210,38 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
       controls.target.set(centerX, centerY, centerZ);
       controlsRef.current = controls;
 
-      // 2. Post-Processing: Tight Bloom to eliminate noise blowout
+      // 2. Post-Processing Bloom
       const renderScene = new RenderPass(scene, camera);
       const bloomPass = new UnrealBloomPass(
         new THREE.Vector2(width, height),
-        0.4, // Tamed bloom strength
-        0.2, // Controlled radius
-        0.8, // High threshold to protect standard matte tiles
+        environmentConfig.bloomStrength,
+        0.2,
+        0.8
       );
+      bloomPassRef.current = bloomPass;
+
       const composer = new EffectComposer(renderer);
       composer.addPass(renderScene);
       composer.addPass(bloomPass);
 
-      // 3. Lighting & Base Grid
-      const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+      // 3. Dynamic Lights
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
       scene.add(ambientLight);
-      const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
-      dirLight.position.set(maxDim * 2, maxDim * 3, maxDim * 1.5);
+
+      const dirLight = new THREE.DirectionalLight(0xffffff, environmentConfig.sunIntensity);
+      dirLightRef.current = dirLight;
       scene.add(dirLight);
 
       const grid = new THREE.GridHelper(
         Math.max(compilerData.dimensions.x, compilerData.dimensions.z) * 1.5,
         20,
         0x334155,
-        0x1e293b,
+        0x1e293b
       );
       grid.position.set(centerX, -0.01, centerZ);
       scene.add(grid);
 
-      // 4. Ghost Wireframe Box for Sculpt Preview
+      // 4. Ghost Box for Sculpting
       const ghostGeo = new THREE.BoxGeometry(1.02, 1.02, 1.02);
       const ghostMat = new THREE.MeshBasicMaterial({
         color: 0x38bdf8,
@@ -209,7 +253,7 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
       ghostMesh.visible = false;
       scene.add(ghostMesh);
 
-      // 5. Instanced Meshes & Metadata
+      // 5. Instanced Meshes
       const staticGroup = new THREE.Group();
       const dynamicGroup = new THREE.Group();
       dynamicGroup.position.set(centerX, centerY, centerZ);
@@ -252,17 +296,11 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
           color: new THREE.Color(p.color),
           roughness: p.roughness ?? 0.6,
           metalness: 0.15,
-          emissive: isEmissive
-            ? new THREE.Color(p.color)
-            : new THREE.Color(0x000000),
-          emissiveIntensity: isEmissive ? 1.0 : 0, // Controlled emissive strength
+          emissive: isEmissive ? new THREE.Color(p.color) : new THREE.Color(0x000000),
+          emissiveIntensity: isEmissive ? 1.0 : 0,
         });
 
-        const instancedMesh = new THREE.InstancedMesh(
-          boxGeometry,
-          material,
-          countToRender,
-        );
+        const instancedMesh = new THREE.InstancedMesh(boxGeometry, material, countToRender);
 
         for (let i = 0; i < countToRender; i++) {
           const rawX = rawCoords[i * 3] + 0.5;
@@ -294,7 +332,7 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
         }
       });
 
-      // 6. Raycasting for Cursor Preview & Mouse Interaction
+      // 6. Raycasting for Interaction
       const raycaster = new THREE.Raycaster();
       const mouse = new THREE.Vector2();
 
@@ -313,11 +351,7 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
         }
 
         const intersects = getRaycastHit(e);
-        if (
-          intersects.length > 0 &&
-          intersects[0].instanceId !== undefined &&
-          intersects[0].face
-        ) {
+        if (intersects.length > 0 && intersects[0].instanceId !== undefined && intersects[0].face) {
           const hit = intersects[0];
           const mesh = hit.object as THREE.InstancedMesh;
           const meta = meshMetadata.get(mesh);
@@ -329,15 +363,15 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
             const vz = meta.rawCoords[id * 3 + 2];
 
             if (e.shiftKey || e.altKey) {
-              ghostMat.color.setHex(0xef4444); // Red wireframe for delete
+              ghostMat.color.setHex(0xef4444);
               ghostMesh.position.set(vx + 0.5, vy + 0.5, vz + 0.5);
             } else {
-              ghostMat.color.setHex(0x38bdf8); // Cyan wireframe for place
+              ghostMat.color.setHex(0x38bdf8);
               const normal = hit.face.normal;
               ghostMesh.position.set(
                 vx + normal.x + 0.5,
                 vy + normal.y + 0.5,
-                vz + normal.z + 0.5,
+                vz + normal.z + 0.5
               );
             }
             ghostMesh.visible = true;
@@ -350,11 +384,7 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
       const handleClick = (e: MouseEvent) => {
         const intersects = getRaycastHit(e);
 
-        if (
-          intersects.length > 0 &&
-          intersects[0].instanceId !== undefined &&
-          intersects[0].face
-        ) {
+        if (intersects.length > 0 && intersects[0].instanceId !== undefined && intersects[0].face) {
           const hit = intersects[0];
           const mesh = hit.object as THREE.InstancedMesh;
           const meta = meshMetadata.get(mesh);
@@ -365,13 +395,11 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
             const vy = meta.rawCoords[id * 3 + 1];
             const vz = meta.rawCoords[id * 3 + 2];
 
-            // SCULPT: DELETE BLOCK
             if (sculptMode && (e.shiftKey || e.altKey)) {
               onDeleteVoxel?.({ x: vx, y: vy, z: vz });
               return;
             }
 
-            // SCULPT: ADD BLOCK
             if (sculptMode && !e.shiftKey && !e.altKey) {
               const normal = hit.face.normal;
               onAddVoxel?.({
@@ -383,7 +411,6 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
               return;
             }
 
-            // INSPECT VOXEL (Sculpt mode inactive)
             onSelectVoxel?.({
               x: vx,
               y: vy,
@@ -415,7 +442,6 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
       };
       animate();
 
-      // 8. Resize Listener
       const handleResize = () => {
         if (!container) return;
         const w = container.clientWidth;
@@ -439,15 +465,7 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
         ghostMat.dispose();
         container.replaceChildren();
       };
-    }, [
-      compilerData,
-      buildProgress,
-      activePaletteId,
-      sculptMode,
-      onSelectVoxel,
-      onAddVoxel,
-      onDeleteVoxel,
-    ]);
+    }, [compilerData, buildProgress, activePaletteId, sculptMode, onSelectVoxel, onAddVoxel, onDeleteVoxel]);
 
     return (
       <div
@@ -459,7 +477,7 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
         }}
       />
     );
-  },
+  }
 );
 
 VoxelCanvas.displayName = "VoxelCanvas";

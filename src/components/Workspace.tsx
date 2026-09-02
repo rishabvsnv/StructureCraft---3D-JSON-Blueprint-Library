@@ -2,7 +2,11 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import Editor from "@monaco-editor/react";
-import VoxelCanvas, { VoxelCanvasHandle, SelectedVoxelInfo } from "./VoxelCanvas";
+import VoxelCanvas, {
+  VoxelCanvasHandle,
+  SelectedVoxelInfo,
+  EnvironmentSettings,
+} from "./VoxelCanvas";
 import { generateSciFiPortal } from "@/utils/generatePortal";
 import { generateRomanColosseum } from "@/utils/generateColosseum";
 import { generateCyberSkyscraper } from "@/utils/generateSkyscraper";
@@ -16,6 +20,45 @@ import {
   deleteBlueprintFromStorage,
   SavedBlueprintItem,
 } from "@/utils/storageUtils";
+
+const ENVIRONMENT_PRESETS: Record<string, EnvironmentSettings> = {
+  space: {
+    preset: "space",
+    bgColor: "#08090d",
+    sunAngle: 45,
+    sunElevation: 50,
+    sunIntensity: 0.9,
+    fogDensity: 0.0,
+    bloomStrength: 0.45,
+  },
+  sunset: {
+    preset: "sunset",
+    bgColor: "#291811",
+    sunAngle: 120,
+    sunElevation: 18,
+    sunIntensity: 1.4,
+    fogDensity: 0.008,
+    bloomStrength: 0.6,
+  },
+  cyber: {
+    preset: "cyber",
+    bgColor: "#040914",
+    sunAngle: 210,
+    sunElevation: 30,
+    sunIntensity: 0.6,
+    fogDensity: 0.012,
+    bloomStrength: 0.8,
+  },
+  studio: {
+    preset: "studio",
+    bgColor: "#1e293b",
+    sunAngle: 90,
+    sunElevation: 75,
+    sunIntensity: 1.8,
+    fogDensity: 0.0,
+    bloomStrength: 0.25,
+  },
+};
 
 export default function Workspace() {
   const [jsonCode, setJsonCode] = useState("");
@@ -37,6 +80,10 @@ export default function Workspace() {
   const [sculptMode, setSculptMode] = useState(false);
   const [activePaletteId, setActivePaletteId] = useState(1);
 
+  // Environment Studio State
+  const [showStudioPanel, setShowStudioPanel] = useState(false);
+  const [envConfig, setEnvConfig] = useState<EnvironmentSettings>(ENVIRONMENT_PRESETS.space);
+
   const canvasRef = useRef<VoxelCanvasHandle | null>(null);
   const workerRef = useRef<Worker | null>(null);
 
@@ -49,7 +96,6 @@ export default function Workspace() {
     setSelectedVoxel(null);
     setShowModal(false);
 
-    // Default to first palette id
     if ((dataObject as any).palette?.length > 0) {
       setActivePaletteId((dataObject as any).palette[0].id);
     }
@@ -68,14 +114,13 @@ export default function Workspace() {
       }
     };
 
-    loadStructure(generateKailashVimana());
+    loadStructure(generateShibuyaCrossing());
 
     return () => {
       workerRef.current?.terminate();
     };
   }, []);
 
-  // Live Sculpt: Add Block
   const handleAddVoxel = (newVoxel: { x: number; y: number; z: number; paletteId: number }) => {
     try {
       const parsed = JSON.parse(jsonCode);
@@ -88,7 +133,6 @@ export default function Workspace() {
     }
   };
 
-  // Live Sculpt: Delete Block
   const handleDeleteVoxel = (target: { x: number; y: number; z: number }) => {
     try {
       const parsed = JSON.parse(jsonCode);
@@ -145,7 +189,17 @@ export default function Workspace() {
           </div>
 
           <div className="d-flex align-items-center gap-2">
-            {/* Sculptor Toggle Button */}
+            {/* Lighting Studio Toggle */}
+            <button
+              className={`btn btn-sm d-flex align-items-center gap-1 ${
+                showStudioPanel ? "btn-warning text-dark fw-bold" : "btn-outline-warning"
+              }`}
+              onClick={() => setShowStudioPanel(!showStudioPanel)}
+            >
+              <i className="bi bi-sun"></i> Studio Lighting
+            </button>
+
+            {/* Sculptor Toggle */}
             <button
               className={`btn btn-sm d-flex align-items-center gap-1 ${
                 sculptMode ? "btn-danger fw-bold" : "btn-outline-primary"
@@ -153,7 +207,7 @@ export default function Workspace() {
               onClick={() => setSculptMode(!sculptMode)}
             >
               <i className={`bi ${sculptMode ? "bi-hammer" : "bi-pencil-square"}`}></i>
-              {sculptMode ? "Sculpting Active" : "Sculpt Mode"}
+              {sculptMode ? "Sculpting" : "Sculpt"}
             </button>
 
             <button
@@ -164,7 +218,7 @@ export default function Workspace() {
             </button>
 
             <button
-              className="btn btn-outline-warning btn-sm d-flex align-items-center gap-1"
+              className="btn btn-outline-secondary btn-sm d-flex align-items-center gap-1"
               onClick={handleSaveToStorage}
             >
               <i className="bi bi-bookmark-plus"></i> Save
@@ -223,7 +277,7 @@ export default function Workspace() {
             </div>
           </div>
 
-          {/* Right 3D Viewport with Live Building Docks */}
+          {/* Right 3D Viewport */}
           <div className="col-12 col-lg-6 d-flex flex-column bg-black h-100 position-relative">
             {/* Top Toolbar */}
             <div className="bg-dark bg-opacity-75 px-3 py-2 border-bottom border-secondary d-flex justify-content-between align-items-center">
@@ -254,7 +308,7 @@ export default function Workspace() {
                 </button>
               </div>
 
-              {/* Build Animation Slider */}
+              {/* Build Progress Slider */}
               <div className="d-flex align-items-center gap-2">
                 <button
                   className={`btn btn-sm ${isPlaying ? "btn-danger" : "btn-primary"} px-2 py-0`}
@@ -281,7 +335,7 @@ export default function Workspace() {
               </div>
             </div>
 
-            {/* 3D Canvas */}
+            {/* 3D Viewport Canvas */}
             <div className="flex-grow-1 position-relative w-100 h-100">
               <VoxelCanvas
                 ref={canvasRef}
@@ -289,10 +343,148 @@ export default function Workspace() {
                 buildProgress={buildProgress}
                 sculptMode={sculptMode}
                 activePaletteId={activePaletteId}
+                environmentConfig={envConfig}
                 onSelectVoxel={(info) => setSelectedVoxel(info)}
                 onAddVoxel={handleAddVoxel}
                 onDeleteVoxel={handleDeleteVoxel}
               />
+
+              {/* Floating Lighting & Environment Studio Panel */}
+              {showStudioPanel && (
+                <div
+                  className="position-absolute top-0 end-0 m-3 p-3 rounded bg-dark border border-secondary shadow-lg text-light"
+                  style={{
+                    width: "280px",
+                    zIndex: 20,
+                    backdropFilter: "blur(10px)",
+                    backgroundColor: "rgba(15, 23, 42, 0.88)",
+                  }}
+                >
+                  <div className="d-flex justify-content-between align-items-center mb-3 pb-2 border-bottom border-secondary">
+                    <span className="small fw-bold text-warning text-uppercase">
+                      <i className="bi bi-sliders me-1"></i> Environment Studio
+                    </span>
+                    <button
+                      className="btn-close btn-close-white"
+                      style={{ fontSize: "10px" }}
+                      onClick={() => setShowStudioPanel(false)}
+                    ></button>
+                  </div>
+
+                  {/* Atmosphere Presets */}
+                  <div className="mb-3">
+                    <label className="form-label small text-secondary mb-1">Atmosphere Preset</label>
+                    <div className="btn-group btn-group-sm w-100">
+                      {(["space", "sunset", "cyber", "studio"] as const).map((p) => (
+                        <button
+                          key={p}
+                          className={`btn ${
+                            envConfig.preset === p ? "btn-warning text-dark fw-bold" : "btn-outline-secondary"
+                          }`}
+                          onClick={() => setEnvConfig(ENVIRONMENT_PRESETS[p])}
+                        >
+                          {p.charAt(0).toUpperCase() + p.slice(1)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Sun Angle Slider */}
+                  <div className="mb-2">
+                    <div className="d-flex justify-content-between">
+                      <label className="form-label small text-secondary mb-0">Sun Azimuth</label>
+                      <small className="text-warning font-monospace">{envConfig.sunAngle}°</small>
+                    </div>
+                    <input
+                      type="range"
+                      className="form-range"
+                      min="0"
+                      max="360"
+                      value={envConfig.sunAngle}
+                      onChange={(e) =>
+                        setEnvConfig({ ...envConfig, sunAngle: parseInt(e.target.value) })
+                      }
+                    />
+                  </div>
+
+                  {/* Sun Elevation */}
+                  <div className="mb-2">
+                    <div className="d-flex justify-content-between">
+                      <label className="form-label small text-secondary mb-0">Sun Elevation</label>
+                      <small className="text-warning font-monospace">{envConfig.sunElevation}°</small>
+                    </div>
+                    <input
+                      type="range"
+                      className="form-range"
+                      min="10"
+                      max="90"
+                      value={envConfig.sunElevation}
+                      onChange={(e) =>
+                        setEnvConfig({ ...envConfig, sunElevation: parseInt(e.target.value) })
+                      }
+                    />
+                  </div>
+
+                  {/* Sun Intensity */}
+                  <div className="mb-2">
+                    <div className="d-flex justify-content-between">
+                      <label className="form-label small text-secondary mb-0">Sun Intensity</label>
+                      <small className="text-warning font-monospace">{envConfig.sunIntensity.toFixed(1)}x</small>
+                    </div>
+                    <input
+                      type="range"
+                      className="form-range"
+                      min="0.1"
+                      max="2.5"
+                      step="0.1"
+                      value={envConfig.sunIntensity}
+                      onChange={(e) =>
+                        setEnvConfig({ ...envConfig, sunIntensity: parseFloat(e.target.value) })
+                      }
+                    />
+                  </div>
+
+                  {/* Atmospheric Fog */}
+                  <div className="mb-2">
+                    <div className="d-flex justify-content-between">
+                      <label className="form-label small text-secondary mb-0">Atmospheric Fog</label>
+                      <small className="text-warning font-monospace">
+                        {(envConfig.fogDensity * 1000).toFixed(0)}
+                      </small>
+                    </div>
+                    <input
+                      type="range"
+                      className="form-range"
+                      min="0"
+                      max="0.02"
+                      step="0.001"
+                      value={envConfig.fogDensity}
+                      onChange={(e) =>
+                        setEnvConfig({ ...envConfig, fogDensity: parseFloat(e.target.value) })
+                      }
+                    />
+                  </div>
+
+                  {/* Bloom Glow Strength */}
+                  <div className="mb-1">
+                    <div className="d-flex justify-content-between">
+                      <label className="form-label small text-secondary mb-0">Bloom Glow</label>
+                      <small className="text-warning font-monospace">{envConfig.bloomStrength.toFixed(2)}</small>
+                    </div>
+                    <input
+                      type="range"
+                      className="form-range"
+                      min="0.0"
+                      max="1.5"
+                      step="0.05"
+                      value={envConfig.bloomStrength}
+                      onChange={(e) =>
+                        setEnvConfig({ ...envConfig, bloomStrength: parseFloat(e.target.value) })
+                      }
+                    />
+                  </div>
+                </div>
+              )}
 
               {/* Bottom Dock: Palette Swatch Selector (Active during Sculpt Mode) */}
               {sculptMode && compilerOutput?.palette && (
@@ -388,7 +580,16 @@ export default function Workspace() {
               <div className="modal-body">
                 {modalTab === "presets" ? (
                   <div className="row g-3">
-                    <div className="col-12 col-md-6 col-lg-3">
+                    <div className="col-12 col-md-6 col-lg-4">
+                      <div className="card bg-black border-secondary h-100 text-light p-3">
+                        <h6 className="text-info fw-bold mb-1">Shibuya 2099</h6>
+                        <p className="text-secondary small mb-3">Cyberpunk intersection with skybridges and monorail.</p>
+                        <button className="btn btn-outline-info btn-sm mt-auto" onClick={() => loadStructure(generateShibuyaCrossing())}>
+                          Load
+                        </button>
+                      </div>
+                    </div>
+                    <div className="col-12 col-md-6 col-lg-4">
                       <div className="card bg-black border-secondary h-100 text-light p-3">
                         <h6 className="text-warning fw-bold mb-1">Kailash Vimana</h6>
                         <p className="text-secondary small mb-3">Floating aerial sanctum with jagged crags.</p>
@@ -397,7 +598,7 @@ export default function Workspace() {
                         </button>
                       </div>
                     </div>
-                    <div className="col-12 col-md-6 col-lg-3">
+                    <div className="col-12 col-md-6 col-lg-4">
                       <div className="card bg-black border-secondary h-100 text-light p-3">
                         <h6 className="text-light fw-bold mb-1">Taj Mahal</h6>
                         <p className="text-secondary small mb-3">Mughal marble monument with onion dome.</p>
@@ -406,7 +607,7 @@ export default function Workspace() {
                         </button>
                       </div>
                     </div>
-                    <div className="col-12 col-md-6 col-lg-3">
+                    <div className="col-12 col-md-6 col-lg-4">
                       <div className="card bg-black border-secondary h-100 text-light p-3">
                         <h6 className="text-danger fw-bold mb-1">Cyber Tower</h6>
                         <p className="text-secondary small mb-3">Multi-tier tower with neon ads.</p>
@@ -415,20 +616,20 @@ export default function Workspace() {
                         </button>
                       </div>
                     </div>
-                    <div className="col-12 col-md-6 col-lg-3">
+                    <div className="col-12 col-md-6 col-lg-4">
                       <div className="card bg-black border-secondary h-100 text-light p-3">
-                        <h6 className="text-info fw-bold mb-1">Sci-Fi Portal</h6>
+                        <h6 className="text-primary fw-bold mb-1">Sci-Fi Portal</h6>
                         <p className="text-secondary small mb-3">Gateway with rotating quantum horizon.</p>
-                        <button className="btn btn-outline-info btn-sm mt-auto" onClick={() => loadStructure(generateSciFiPortal(9, 3))}>
+                        <button className="btn btn-outline-primary btn-sm mt-auto" onClick={() => loadStructure(generateSciFiPortal(9, 3))}>
                           Load
                         </button>
                       </div>
                     </div>
-                    <div className="col-12 col-md-6 col-lg-3">
+                    <div className="col-12 col-md-6 col-lg-4">
                       <div className="card bg-black border-secondary h-100 text-light p-3">
-                        <h6 className="text-info fw-bold mb-1">Shibuya Crossing</h6>
-                        <p className="text-secondary small mb-3">Futuristic intersection with neon lights.</p>
-                        <button className="btn btn-outline-info btn-sm mt-auto" onClick={() => loadStructure(generateShibuyaCrossing())}>
+                        <h6 className="text-warning fw-bold mb-1">Roman Colosseum</h6>
+                        <p className="text-secondary small mb-3">Parametric classical amphitheater.</p>
+                        <button className="btn btn-outline-warning btn-sm mt-auto" onClick={() => loadStructure(generateRomanColosseum(11, 9))}>
                           Load
                         </button>
                       </div>
