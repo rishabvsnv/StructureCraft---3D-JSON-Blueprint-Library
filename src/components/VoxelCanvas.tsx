@@ -107,7 +107,6 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
     const dirLightRef = useRef<THREE.DirectionalLight | null>(null);
     const bloomPassRef = useRef<UnrealBloomPass | null>(null);
 
-    // Dynamic Shader Uniforms (shared time value)
     const shaderUniformsRef = useRef<{ uTime: { value: number } }>({
       uTime: { value: 0 },
     });
@@ -255,7 +254,6 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
       }
     }, [environmentConfig, compilerData]);
 
-    // Primary scene setup
     useEffect(() => {
       const container = mountRef.current;
       if (!container || !compilerData) return;
@@ -274,6 +272,7 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
         compilerData.dimensions.z,
       );
 
+      // 1. Scene, Camera, Renderer
       const scene = new THREE.Scene();
       scene.background = new THREE.Color(environmentConfig.bgColor);
       if (environmentConfig.fogDensity > 0) {
@@ -299,7 +298,7 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
       renderer.setSize(width, height);
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.0;
+      renderer.toneMappingExposure = 1.15; // Raised exposure for defined surfaces
       container.appendChild(renderer.domElement);
       rendererRef.current = renderer;
 
@@ -309,6 +308,7 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
       controls.enabled = !walkthroughModeRef.current;
       controlsRef.current = controls;
 
+      // 2. Post-processing Bloom
       const renderScene = new RenderPass(scene, camera);
       const bloomPass = new UnrealBloomPass(
         new THREE.Vector2(width, height),
@@ -322,25 +322,40 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
       composer.addPass(renderScene);
       composer.addPass(bloomPass);
 
-      const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-      scene.add(ambientLight);
+      // 3. Studio 3-Point Lighting Setup (Like Babylon Sandbox)
+      // Hemisphere Light (Gives dark walls ground bounce & sky ambient so they are always visible)
+      const hemiLight = new THREE.HemisphereLight(0xe2e8f0, 0x1e293b, 1.2);
+      scene.add(hemiLight);
 
+      // Key Sun Light
       const dirLight = new THREE.DirectionalLight(
         0xffffff,
         environmentConfig.sunIntensity,
       );
+      dirLight.position.set(maxDim * 2, maxDim * 2.5, maxDim * 1.8);
       dirLightRef.current = dirLight;
       scene.add(dirLight);
+
+      // Fill Light (Softens opposite side so dark blocks keep shape)
+      const fillLight = new THREE.DirectionalLight(0x94a3b8, 0.8);
+      fillLight.position.set(-maxDim * 2, maxDim * 1.5, -maxDim * 1.5);
+      scene.add(fillLight);
+
+      // Rim Light (Edge highlights)
+      const rimLight = new THREE.DirectionalLight(0xffffff, 0.5);
+      rimLight.position.set(0, -maxDim, -maxDim * 2);
+      scene.add(rimLight);
 
       const grid = new THREE.GridHelper(
         Math.max(compilerData.dimensions.x, compilerData.dimensions.z) * 1.5,
         20,
+        0x475569,
         0x334155,
-        0x1e293b,
       );
       grid.position.set(centerX, -0.01, centerZ);
       scene.add(grid);
 
+      // 4. Ghost Box for Sculpting
       const ghostGeo = new THREE.BoxGeometry(1.02, 1.02, 1.02);
       const ghostMat = new THREE.MeshBasicMaterial({
         color: 0x38bdf8,
@@ -352,6 +367,7 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
       ghostMesh.visible = false;
       scene.add(ghostMesh);
 
+      // 5. Structure Meshes
       const staticGroup = new THREE.Group();
       const dynamicGroup = new THREE.Group();
       dynamicGroup.position.set(centerX, centerY, centerZ);
@@ -405,7 +421,6 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
           emissiveIntensity: isEmissive ? emissivePower : 0,
         });
 
-        // Inject Custom Shader FX via onBeforeCompile
         if (p.shaderFx && p.shaderFx !== "none") {
           material.onBeforeCompile = (shader) => {
             shader.uniforms.uTime = shaderUniformsRef.current.uTime;
@@ -659,7 +674,6 @@ const VoxelCanvas = forwardRef<VoxelCanvasHandle, VoxelCanvasProps>(
         const delta = Math.min(timer.getDelta(), 0.1);
         const elapsedTime = timer.getElapsed();
 
-        // Feed global time to custom shaders
         shaderUniformsRef.current.uTime.value = elapsedTime;
 
         if (hasAnimatedElements) {

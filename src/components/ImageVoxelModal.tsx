@@ -17,7 +17,9 @@ export default function ImageVoxelModal({
   onClose,
   onLoadStructure,
 }: ImageVoxelModalProps) {
-  const [activeMode, setActiveMode] = useState<"heightmap" | "pixelart">("heightmap");
+  const [activeMode, setActiveMode] = useState<"heightmap" | "pixelart">(
+    "heightmap",
+  );
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [gridSize, setGridSize] = useState(48);
@@ -97,7 +99,8 @@ export default function ImageVoxelModal({
                 className={`btn ${activeMode === "pixelart" ? "btn-info text-dark fw-bold" : "btn-outline-secondary"}`}
                 onClick={() => setActiveMode("pixelart")}
               >
-                <i className="bi bi-grid-3x3-gap-fill me-1"></i> Pixel Art Extruder
+                <i className="bi bi-grid-3x3-gap-fill me-1"></i> Pixel Art
+                Extruder
               </button>
             </div>
 
@@ -120,7 +123,11 @@ export default function ImageVoxelModal({
                     src={previewUrl}
                     alt="Preview"
                     className="rounded border border-secondary"
-                    style={{ maxHeight: "110px", maxWidth: "100%", objectFit: "contain" }}
+                    style={{
+                      maxHeight: "110px",
+                      maxWidth: "100%",
+                      objectFit: "contain",
+                    }}
                   />
                   <small className="text-info">{selectedFile?.name}</small>
                 </div>
@@ -137,8 +144,12 @@ export default function ImageVoxelModal({
             {/* Config Sliders */}
             <div className="mb-2">
               <div className="d-flex justify-content-between">
-                <label className="form-label small text-secondary mb-0">Grid Resolution</label>
-                <small className="text-info font-monospace">{gridSize}x{gridSize}</small>
+                <label className="form-label small text-secondary mb-0">
+                  Grid Resolution
+                </label>
+                <small className="text-info font-monospace">
+                  {gridSize}x{gridSize}
+                </small>
               </div>
               <input
                 type="range"
@@ -154,8 +165,12 @@ export default function ImageVoxelModal({
             {activeMode === "heightmap" ? (
               <div className="mb-2">
                 <div className="d-flex justify-content-between">
-                  <label className="form-label small text-secondary mb-0">Max Elevation Height</label>
-                  <small className="text-info font-monospace">{maxHeight} blocks</small>
+                  <label className="form-label small text-secondary mb-0">
+                    Max Elevation Height
+                  </label>
+                  <small className="text-info font-monospace">
+                    {maxHeight} blocks
+                  </small>
                 </div>
                 <input
                   type="range"
@@ -169,8 +184,12 @@ export default function ImageVoxelModal({
             ) : (
               <div className="mb-2">
                 <div className="d-flex justify-content-between">
-                  <label className="form-label small text-secondary mb-0">Extrusion Depth</label>
-                  <small className="text-info font-monospace">{extrudeDepth} blocks</small>
+                  <label className="form-label small text-secondary mb-0">
+                    Extrusion Depth
+                  </label>
+                  <small className="text-info font-monospace">
+                    {extrudeDepth} blocks
+                  </small>
                 </div>
                 <input
                   type="range"
@@ -197,7 +216,10 @@ export default function ImageVoxelModal({
             >
               {isProcessing ? (
                 <>
-                  <span className="spinner-border spinner-border-sm me-1" role="status" />
+                  <span
+                    className="spinner-border spinner-border-sm me-1"
+                    role="status"
+                  />
                   Compiling...
                 </>
               ) : (

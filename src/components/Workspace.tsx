@@ -11,6 +11,7 @@ import VoxelCanvas, {
   ShaderEffectType,
 } from "./VoxelCanvas";
 import RadarHUD from "./RadarHUD";
+import ImageVoxelModal from "./ImageVoxelModal";
 import { generateSciFiPortal } from "@/utils/generatePortal";
 import { generateRomanColosseum } from "@/utils/generateColosseum";
 import { generateCyberSkyscraper } from "@/utils/generateSkyscraper";
@@ -25,15 +26,13 @@ import {
   SavedBlueprintItem,
 } from "@/utils/storageUtils";
 
-import ImageVoxelModal from "./ImageVoxelModal";
-
 const ENVIRONMENT_PRESETS: Record<string, EnvironmentSettings> = {
   space: {
     preset: "space",
-    bgColor: "#08090d",
+    bgColor: "#181a20", // Soft studio dark gray (not pure black void)
     sunAngle: 45,
     sunElevation: 50,
-    sunIntensity: 0.9,
+    sunIntensity: 1.3,
     fogDensity: 0.0,
     bloomStrength: 0.45,
   },
@@ -48,16 +47,16 @@ const ENVIRONMENT_PRESETS: Record<string, EnvironmentSettings> = {
   },
   cyber: {
     preset: "cyber",
-    bgColor: "#040914",
+    bgColor: "#090d16",
     sunAngle: 210,
     sunElevation: 30,
-    sunIntensity: 0.6,
+    sunIntensity: 0.9,
     fogDensity: 0.012,
     bloomStrength: 0.8,
   },
   studio: {
     preset: "studio",
-    bgColor: "#1e293b",
+    bgColor: "#262b36",
     sunAngle: 90,
     sunElevation: 75,
     sunIntensity: 1.8,
@@ -96,7 +95,6 @@ export default function Workspace() {
     ENVIRONMENT_PRESETS.space,
   );
 
-  // Material & Shader Studio Drawer State
   const [showPaletteStudio, setShowPaletteStudio] = useState(false);
   const [selectedPaletteItem, setSelectedPaletteItem] =
     useState<PaletteItem | null>(null);
@@ -129,7 +127,6 @@ export default function Workspace() {
         setCompilerOutput(e.data);
         setErrorStatus(null);
 
-        // Keep palette item editor synced with active re-compilations
         if (selectedPaletteItem) {
           const matched = e.data.palette.find(
             (p: PaletteItem) => p.id === selectedPaletteItem.id,
@@ -161,7 +158,6 @@ export default function Workspace() {
     }
   };
 
-  // Live Mutation of a Palette Property (updates Monaco JSON & recompiles)
   const updatePaletteProperty = <K extends keyof PaletteItem>(
     key: K,
     value: PaletteItem[K],
@@ -1251,11 +1247,12 @@ export default function Workspace() {
         </div>
       )}
 
+      {/* Image & Terrain Generator Modal */}
       <ImageVoxelModal
-  isOpen={showImageModal}
-  onClose={() => setShowImageModal(false)}
-  onLoadStructure={(blueprint) => loadStructure(blueprint)}
-/>
+        isOpen={showImageModal}
+        onClose={() => setShowImageModal(false)}
+        onLoadStructure={(blueprint) => loadStructure(blueprint)}
+      />
     </div>
   );
 }
